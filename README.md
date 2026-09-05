@@ -13,27 +13,42 @@
  </div>
 </div>
 
-**[English](README.md)** | **简体中文 (当前)**
+> [!IMPORTANT]
+> 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 二次开发，
+> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**，用于在无桌面环境的 Linux 服务器上
+> 提供 Live2D 视频渲染服务。如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
+> [Untitled-Story](https://github.com/Untitled-Story) 组织。
 
 ## 项目简介
 
-MySekaiStoryteller 是一个**无头（headless）视频渲染服务**：接收 `*.sekai-story.json`
-故事剧本，用 Live2D（Project SEKAI 风格）渲染并导出为 MP4 视频，通过 HTTP API 对外提供
-服务。适合部署在无桌面环境的 Linux 服务器（含 NVIDIA GPU 硬件加速），配合
-[AstrBot 插件](astrbot_plugin_msst/) 实现 QQ/Telegram 机器人的 AI 剧本生成与视频发送。
+接收 `*.sekai-story.json` 故事剧本，用 Live2D（Project SEKAI 风格）渲染并导出为 MP4 视频，
+通过 HTTP API 对外提供服务。典型用法：部署在一台带 GPU 的服务器上，配合
+[AstrBot 插件](astrbot_plugin_msst/) 实现 QQ/Telegram 机器人的 AI 剧本生成与视频自动发送。
 
-- **渲染引擎**: PixiJS + Live2D 跑在无头 Chrome（Playwright 渲染池，每页面独立 WebGL 上下文）
-- **视频编码**: ffmpeg（自动探测 NVENC / AMF / QSV 硬件编码，失败自动回退 CPU）
+- **渲染引擎**: PixiJS + Live2D 跑在无头 Chrome 里（Playwright 渲染池，每个页面独立 WebGL 上下文）
+- **视频编码**: ffmpeg 自动探测 NVENC / AMF / QSV 硬件编码，失败自动回退 CPU
 - **音频**: 内置 BGM + TTS 语音合成（GPT-SoVITS 本地服务或远程 TTS 服务）
-- **队列管理**: 任务排队、并发导出、限流、过期文件自动清理
+- **队列管理**: 任务排队、并发导出、IP 限流、过期文件自动清理
 - **AI 集成**: AstrBot 插件支持 LLM 生成剧本 → 自动渲染 → 自动发视频
+
+## 与原项目的主要差异
+
+|            | 原项目（Electron 桌面应用）   | 本项目（纯 API 渲染框架）            |
+| ---------- | ----------------------- | ------------------------------ |
+| 运行形态      | 桌面窗口应用，附带 HTTP API      | 无头 Node 服务，仅 HTTP API          |
+| 桌面环境依赖     | 需要 GUI                  | 无需 GUI / Xorg / Xvfb           |
+| 渲染宿主       | Electron 窗口（隐藏/离屏）      | Playwright 管理的无头 Chrome 渲染池    |
+| 导出并发       | 单窗口串行                   | N 个 worker 真并行（独立 WebGL 上下文）   |
+| 视频编码       | 固定 libx264（CPU）         | 自动探测 NVENC/AMF/QSV，失败回退 CPU    |
+| 进程隔离       | 无                       | 单任务崩溃不影响服务，页面按次数自动回收           |
+| AstrBot 插件 | 兼容                      | 兼容（API 契约不变，零改动）               |
 
 ## 快速开始
 
 ### 构建与启动
 
 ```bash
-git clone https://github.com/Untitled-Story/MySekaiStoryteller.git
+git clone https://github.com/yonglanws/MySekaiStoryteller.git
 cd MySekaiStoryteller
 
 npm ci
@@ -55,10 +70,12 @@ npm run e2e                        # 内置示例故事导出 + 产物断言
 node scripts/test-parallel.mjs 2   # 并发导出验证
 ```
 
+E2E 会自动把示例故事中缺失的模型变体替换为本机实际存在的资源。
+
 ### Linux 服务器部署（NVIDIA 硬件加速）
 
 详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、全部环境变量、
-systemd 单元、NVENC 验证与无 GPU 时的参数调优。
+systemd 单元、NVENC 验证三步与无 GPU 时的参数调优。
 
 ## AstrBot 插件
 
@@ -158,7 +175,7 @@ TTS 代理服务（默认 `:9882`）：`/synthesize`、`/synthesize/audio`、`/s
 ### 远程 TTS 服务
 
 宿主内置 TTS 代理服务（默认端口 `9882`）：合成、批量合成、角色声音注册、缓存管理、
-自动健康检查。
+自动健康检查。无 TTS 时导出仍会成功（自动跳过语音），只是没有角色配音。
 
 ## 项目结构
 
@@ -186,19 +203,14 @@ astrbot_plugin_msst/  AstrBot 机器人插件
 
 **Q: health 里 WebGL renderer 显示 SwiftShader / llvmpipe**
 
-WebGL 落到了软件渲染。Linux + NVIDIA 下尝试 `MSS_CHROME_ARGS="--use-angle=gl"`，
-详见部署文档的参数调优章节。
+WebGL 落到了软件渲染，导出会慢 5-10 倍。Linux + NVIDIA 下尝试
+`MSS_CHROME_ARGS="--use-angle=gl"`，详见部署文档的参数调优章节。
 
 **Q: 视频导出失败或卡住**
 
 - 查看宿主日志中的 ffmpeg / 渲染错误
 - 尝试降低 `MSS_WORKERS`（显存/内存不足时）
 - 确认 `MSS_FFMPEG_ENCODER` 对应的硬件在当前机器可用（失败会自动回退 CPU）
-
-**Q: TTS 语音合成失败**
-
-- 确认 GPT-SoVITS 已启动（默认 `127.0.0.1:9880`）
-- 无 TTS 时导出仍会成功（自动跳过语音），只是没有角色配音
 
 **Q: AstrBot 插件无法连接**
 
@@ -207,10 +219,13 @@ WebGL 落到了软件渲染。Linux + NVIDIA 下尝试 `MSS_CHROME_ARGS="--use-a
 
 ## 许可证
 
-本项目采用 [MIT 许可证](LICENSE)；导出视频的使用受 [VIDEO-LICENSE-CN.md](VIDEO-LICENSE-CN.md) 约束。
+本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller)
+二次开发，沿用 **[GNU GPL v3](LICENSE)** 许可证开源；导出视频的使用另受
+[VIDEO-LICENSE-CN.md](VIDEO-LICENSE-CN.md) 约束。
 
 ## 致谢
 
+- [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) — 本项目的基底，感谢原作者 [GuangChen2333](https://github.com/GuangChen2333)
 - [Project SEKAI](https://pjsekai.sega.jp/) - 灵感和资源来源
 - [Live2D Cubism](https://www.live2d.com/) - Live2D 渲染引擎
 - [Playwright](https://playwright.dev/) - 无头浏览器自动化

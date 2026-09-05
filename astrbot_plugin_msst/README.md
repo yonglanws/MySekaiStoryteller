@@ -185,4 +185,4 @@ astrbot/
 
 ## 许可证
 
-与 MySekaiStoryteller 相同的许可证。
+本项目与 MySekaiStoryteller 渲染宿主一同以 [GNU GPL v3](https://github.com/yonglanws/MySekaiStoryteller/blob/main/LICENSE) 许可证开源。
