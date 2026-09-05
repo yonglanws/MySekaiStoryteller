@@ -7,22 +7,111 @@ export default class AnimationManager {
     name: 'WatchDog'
   })
 
+  public static exportSpeedMultiplier: number = 1
+  public static exportTargetFPS: number = 60
+  private static isExportMode: boolean = false
+
+  public static setExportMode(enabled: boolean): void {
+    this.isExportMode = enabled
+  }
+
+  public static isExporting(): boolean {
+    return this.isExportMode
+  }
+
   public static async in_ticker(
+    on_step: (ticker: Ticker) => void,
+    when_finish: (ticker: Ticker) => boolean
+  ): Promise<void> {
+    if (AnimationManager.isExportMode) {
+      await AnimationManager.in_ticker_settimeout(on_step, when_finish)
+    } else {
+      await AnimationManager.in_ticker_raf(on_step, when_finish)
+    }
+  }
+
+  private static async in_ticker_settimeout(
+    on_step: (ticker: Ticker) => void,
+    when_finish: (ticker: Ticker) => boolean
+  ): Promise<void> {
+    const interval = Math.max(Math.round(1000 / AnimationManager.exportTargetFPS), 8)
+    let lastTime = performance.now()
+    const startTime = performance.now()
+    const maxDuration = 15000
+
+    await new Promise<void>((resolve) => {
+      const step = (): void => {
+        const now = performance.now()
+        const delta = now - lastTime
+        lastTime = now
+
+        const fakeTicker = {
+          elapsedMS: delta,
+          deltaTime: delta * 0.06,
+          lastTime: now
+        } as Ticker
+
+        on_step(fakeTicker)
+        if (when_finish(fakeTicker)) {
+          resolve()
+          return
+        }
+
+        if (now - startTime > maxDuration) {
+          this.logger.warn(
+            `in_ticker_settimeout exceeded ${maxDuration}ms, forcing completion (started at ${startTime}, now=${now})`
+          )
+          resolve()
+          return
+        }
+
+        setTimeout(step, interval)
+      }
+
+      setTimeout(step, interval)
+    })
+  }
+
+  private static async in_ticker_raf(
     on_step: (ticker: Ticker) => void,
     when_finish: (ticker: Ticker) => boolean
   ): Promise<void> {
     const task = new Promise<void>((resolve) => {
       const ticker = new Ticker()
-      ticker.maxFPS = 60
 
-      ticker.add(() => {
+      ticker.maxFPS = AnimationManager.exportSpeedMultiplier > 1 ? 0 : 60
+
+      const startTime = performance.now()
+      const maxDuration = 15000
+      let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+      const tickerFn = (): void => {
         on_step(ticker)
         if (when_finish(ticker)) {
           resolve()
+          ticker.stop()
           ticker.destroy()
+          if (timeoutId) clearTimeout(timeoutId)
+          return
         }
-      }, UPDATE_PRIORITY.INTERACTION)
+        if (performance.now() - startTime > maxDuration) {
+          this.logger.warn(`in_ticker_raf exceeded ${maxDuration}ms, forcing completion`)
+          resolve()
+          ticker.stop()
+          ticker.destroy()
+          if (timeoutId) clearTimeout(timeoutId)
+        }
+      }
+
+      ticker.add(tickerFn, UPDATE_PRIORITY.INTERACTION)
       ticker.start()
+
+      timeoutId = setTimeout(() => {
+        this.logger.warn(`in_ticker_raf timeout after ${maxDuration}ms, forcing completion`)
+        resolve()
+        ticker.stop()
+        ticker.destroy()
+      }, maxDuration)
     })
     await task
   }
@@ -32,10 +121,11 @@ export default class AnimationManager {
     time_ms: number,
     elegant: boolean = false
   ): Promise<void> {
+    const effectiveTime = time_ms / AnimationManager.exportSpeedMultiplier
     let progress = 0
     animation(0)
 
-    if (time_ms >= 30) {
+    if (effectiveTime >= 30) {
       await AnimationManager.in_ticker(
         (ticker) => {
           const rawDeltaTime = ticker.elapsedMS
@@ -48,7 +138,7 @@ export default class AnimationManager {
             usedTime = 20
           }
 
-          progress += usedTime / time_ms
+          progress += usedTime / effectiveTime
           progress = Math.min(progress, 1)
           animation(progress)
         },
@@ -89,10 +179,12 @@ export default class AnimationManager {
   }
 
   public static async delay(time_ms: number): Promise<void> {
+    const effectiveDelay = time_ms / AnimationManager.exportSpeedMultiplier
+    if (effectiveDelay <= 0) return
     return new Promise<void>((resolve) => {
       setTimeout(() => {
         resolve()
-      }, time_ms)
+      }, effectiveDelay)
     })
   }
 }

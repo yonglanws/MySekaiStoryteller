@@ -1,0 +1,1575 @@
+import { App } from '../app/App'
+import AnimationManager from './AnimationManager'
+import { Ticker } from 'pixi.js'
+import { SelectStoryResponse } from '../../../common/types/IpcResponse'
+import {
+  ExportLogger,
+  CheckpointManager,
+  ProgressTracker,
+  ErrorRecoveryManager,
+  ExportError,
+  ExportErrorCode,
+  ExportResult,
+  StreamRecorder,
+  AudioMuxer,
+  ConcurrentExportPipeline,
+  SnippetTimestampRecorder,
+  AsyncFrameCapturer
+} from './video-export'
+import type { VideoExportOptions } from './video-export'
+import type { ExportProgress as ExtendedExportProgress } from './video-export'
+import type { SnippetData } from '../../../common/types/Story'
+import type { SnippetTimelineEntry } from './TTSManager'
+import { estimateSnippetDuration } from '../utils/TimelineCalculator'
+import { webGLValidator } from '../utils/WebGLContextValidator'
+import { frameValidator } from '../utils/FrameContentValidator'
+import { builtinResourceUrl } from '../utils/ResourceUrl'
+
+export { VideoExportOptions }
+export interface ExportProgress {
+  stage: 'initializing' | 'loading' | 'capturing' | 'encoding' | 'saving' | 'complete'
+  current: number
+  total: number
+  message: string
+}
+
+type ProgressCallback = (progress: ExportProgress) => void
+type InternalProgressCallback = (progress: ExtendedExportProgress) => void
+
+export default class VideoExportManager {
+  private readonly logger: ExportLogger
+  private readonly checkpointManager: CheckpointManager
+  private readonly errorRecovery: ErrorRecoveryManager
+  private readonly progressTracker: ProgressTracker
+
+  private readonly app: App
+  private isAborted: boolean = false
+  private abortController: AbortController | null = null
+
+  private static readonly DEFAULT_BATCH_SIZE = 30
+
+  constructor(app: App) {
+    this.app = app
+    this.logger = new ExportLogger('VideoExportManager')
+    this.checkpointManager = new CheckpointManager()
+    this.errorRecovery = new ErrorRecoveryManager(3)
+    this.progressTracker = new ProgressTracker()
+  }
+
+  public abort(): void {
+    this.isAborted = true
+    this.abortController?.abort()
+    this.logger.info('Export aborted by user')
+  }
+
+  private resetState(): void {
+    this.isAborted = false
+    this.abortController = new AbortController()
+    this.errorRecovery.reset()
+    this.checkpointManager.clearCheckpoint()
+  }
+
+  private checkAborted(): void {
+    if (this.isAborted) {
+      throw ExportError.cancelled()
+    }
+  }
+
+  private async yieldToBrowser(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0))
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  private async requestAnimationFrameOnce(): Promise<void> {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => resolve(undefined))
+    })
+  }
+
+  private createProgressAdapter(onProgress?: ProgressCallback): InternalProgressCallback {
+    return (progress: ExtendedExportProgress) => {
+      if (onProgress) {
+        onProgress({
+          stage: progress.stage as ExportProgress['stage'],
+          current: progress.current,
+          total: progress.total,
+          message: progress.message
+        })
+      }
+    }
+  }
+
+  private async executeSnippet(snippet: SnippetData): Promise<void> {
+    await this.app.snippetStrategyManager.handleSnippetForExport(snippet)
+  }
+
+  private async processSnippetFrames(
+    snippet: SnippetData,
+    _index: number,
+    fps: number,
+    canvas: HTMLCanvasElement,
+    capturer: AsyncFrameCapturer
+  ): Promise<number> {
+    const originalDurationMs = Math.round(snippet.delay * 1000)
+    const frameIntervalMs = 1000 / fps
+    const targetFrameCount = Math.max(1, Math.round(originalDurationMs / frameIntervalMs))
+
+    await this.executeSnippet(snippet)
+
+    const capturePromises: Promise<void>[] = []
+    const batchLimit = 60
+
+    for (let f = 0; f < targetFrameCount; f++) {
+      capturePromises.push(capturer.captureFrameAsync(canvas))
+
+      if ((f + 1) % batchLimit === 0) {
+        await Promise.all(capturePromises)
+        capturePromises.length = 0
+        await this.yieldToBrowser()
+      }
+    }
+
+    if (capturePromises.length > 0) {
+      await Promise.all(capturePromises)
+    }
+
+    return targetFrameCount
+  }
+
+  async exportVideo(
+    options: VideoExportOptions,
+    onProgress?: ProgressCallback
+  ): Promise<ExportResult> {
+    this.resetState()
+
+    const startTime = performance.now()
+    const progressCallback = this.createProgressAdapter(onProgress)
+    const isApiMode = options.apiMode === true
+
+    let overlay: HTMLElement | null = null
+    let progressFill: HTMLDivElement | null = null
+    let exportStatus: HTMLElement | null = null
+
+    if (!isApiMode) {
+      overlay = document.getElementById('export-overlay')
+      progressFill = document.getElementById('progressFill') as HTMLDivElement | null
+      exportStatus = document.getElementById('exportStatus')
+      if (overlay) overlay.hidden = false
+    }
+
+    try {
+      this.logger.info('Starting video export', { ...options, apiMode: isApiMode })
+
+      this.progressTracker.start()
+      this.app.exporting = true
+
+      await this.initializeExport(options, progressFill, exportStatus, progressCallback)
+      this.checkAborted()
+
+      if (options.exportMode === 'stream') {
+        const maxRetries = 2
+        let lastError: Error | null = null
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          try {
+            if (attempt > 0) {
+              this.logger.info(`Retrying stream export, attempt ${attempt + 1}/${maxRetries + 1}`)
+              if (exportStatus)
+                exportStatus.textContent = `重试导出 (${attempt + 1}/${maxRetries + 1})…`
+
+              this.app.lastSnippetActualDurationMs = 0
+              this.app.ttsManager?.clearAudioTracks()
+
+              await this.sleep(1000)
+            }
+            return await this.exportVideoStream(
+              options,
+              progressFill,
+              exportStatus,
+              progressCallback
+            )
+          } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error))
+            const errorMsg = lastError.message
+            const isNotReadable =
+              errorMsg.includes('NotReadableError') || errorMsg.includes('could not be read')
+            const isContextLost =
+              errorMsg.includes('context lost') || errorMsg.includes('Context lost')
+
+            if ((isNotReadable || isContextLost) && attempt < maxRetries) {
+              this.logger.warn(
+                `Stream export failed (attempt ${attempt + 1}), will retry: ${errorMsg}`
+              )
+              continue
+            }
+            throw error
+          }
+        }
+        throw lastError
+      }
+
+      const { canvas, framesDir, totalSnippets, startSnippetIndex, startFrameIndex } =
+        await this.prepareRendering(options, progressFill, exportStatus, progressCallback)
+      this.checkAborted()
+
+      const result = await this.captureAndEncodeFrames(
+        options,
+        canvas,
+        framesDir,
+        totalSnippets,
+        startSnippetIndex,
+        startFrameIndex,
+        progressFill,
+        exportStatus,
+        progressCallback
+      )
+
+      result.duration = (performance.now() - startTime) / 1000
+
+      this.logger.info('Export completed successfully', {
+        duration: result.duration,
+        frameCount: result.frameCount
+      })
+
+      if (!isApiMode) {
+        await this.showCompletionMessage(progressFill!, exportStatus!, progressCallback)
+      }
+
+      return result
+    } catch (error) {
+      return await this.handleExportError(error, exportStatus || document.body, startTime)
+    } finally {
+      this.cleanup()
+    }
+  }
+
+  private async exportVideoStream(
+    options: VideoExportOptions,
+    progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<ExportResult> {
+    const startTime = performance.now()
+    const isApiMode = options.apiMode === true
+
+    const { canvas, snippets } = await this.prepareStreamRecording(
+      options,
+      progressFill,
+      exportStatus,
+      onProgress
+    )
+    this.checkAborted()
+
+    this.logger.info('Starting concurrent stream recording', {
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      snippetCount: snippets.length,
+      apiMode: isApiMode
+    })
+
+    let totalDurationMs = 0
+    let timeline: SnippetTimelineEntry[] = []
+
+    const recorder = new StreamRecorder({
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      bitrate: 8000000,
+      timeslice: 100,
+      estimatedDurationMs: undefined
+    })
+
+    recorder.setOnErrorCallback((error) => {
+      this.logger.error('StreamRecorder error during recording', error)
+    })
+
+    let videoFilePath: string | null = null
+
+    let ttsEnabled = this.app.ttsManager?.isTTSEnabled() ?? false
+    if (ttsEnabled) {
+      this.logger.info('Checking TTS service availability...')
+      const available = await this.app.ttsManager!.checkTTSAvailability()
+      if (!available) {
+        this.logger.warn('TTS service not available. Disabling TTS for this export.')
+        ttsEnabled = false
+      } else {
+        this.logger.info('TTS service available')
+      }
+    }
+    const bgmConfig = this.app.ttsManager?.getBGMConfig()
+    const bgmEnabled = bgmConfig?.enabled ?? false
+    const audioMuxer = new AudioMuxer()
+    if (ttsEnabled || bgmEnabled) {
+      await audioMuxer.initialize()
+    }
+
+    let bgmBuffer: AudioBuffer | null = null
+    if (bgmEnabled && bgmConfig) {
+      audioMuxer.setBGMConfig(bgmConfig)
+      try {
+        let bgmPath = bgmConfig.path
+        if (bgmPath.startsWith('resources/builtin/')) {
+          const relativePath = bgmPath.replace('resources/builtin/', '')
+          bgmPath = builtinResourceUrl(relativePath)
+        }
+        this.logger.info(`Loading BGM from: ${bgmPath}`)
+        bgmBuffer = await audioMuxer.loadBGMBuffer(bgmPath)
+        this.logger.info(
+          `BGM loaded: ${bgmBuffer ? 'success' : 'failed'}, duration: ${bgmBuffer ? bgmBuffer.duration.toFixed(2) : 0}s`
+        )
+      } catch (error) {
+        this.logger.warn(`Failed to load BGM: ${error}`)
+      }
+    }
+
+    const concurrentPipeline = new ConcurrentExportPipeline({
+      ttsLookahead: 3,
+      ttsTimeoutMs: 15000,
+      targetFps: options.fps
+    })
+
+    const timestampRecorder = new SnippetTimestampRecorder()
+
+    const ttsAudioResults = new Map<
+      number,
+      {
+        audioBuffer: ArrayBuffer
+        pcmData?: {
+          channel0: Float32Array
+          channel1: Float32Array
+          sampleRate: number
+        }
+        durationMs: number
+        characterName: string
+        text: string
+        preDecoded: boolean
+      }
+    >()
+
+    if (ttsEnabled) {
+      this.logger.info('Concurrent mode: Starting TTS pipeline in background')
+      if (exportStatus) exportStatus.textContent = '启动并发语音合成…'
+
+      timeline = this.app.ttsManager.buildTimelineWithoutTTS(snippets)
+      this.app.ttsManager.setTimeline(timeline)
+
+      concurrentPipeline.startTTSPipeline(
+        snippets,
+        this.app.ttsManager,
+        (current, total, message) => {
+          this.logger.info(`[TTS Pipeline] ${current}/${total}: ${message}`)
+        }
+      )
+    } else {
+      timeline = this.app.ttsManager.buildTimelineWithoutTTS(snippets)
+      this.app.ttsManager.setTimeline(timeline)
+    }
+
+    totalDurationMs = timeline.length > 0 ? timeline[timeline.length - 1].endTimeMs : 0
+
+    const totalSnippets = snippets.length
+    let contextLost = false
+    let contextRestoreAttempts = 0
+    const MAX_CONTEXT_RESTORE_ATTEMPTS = 3
+
+    const handleContextLost = (event: Event): void => {
+      event.preventDefault()
+      contextLost = true
+      this.logger.error('Canvas WebGL context lost during recording')
+    }
+
+    const handleContextRestored = (): void => {
+      contextLost = false
+      contextRestoreAttempts = 0
+      this.logger.info('Canvas WebGL context restored')
+    }
+
+    canvas.addEventListener('webglcontextlost', handleContextLost)
+    canvas.addEventListener('webglcontextrestored', handleContextRestored)
+
+    try {
+      videoFilePath = await recorder.startRecordingToDisk(canvas)
+      concurrentPipeline.markRenderStart()
+      timestampRecorder.markRenderStart()
+
+      this.logger.info('Concurrent mode: Video rendering started', {
+        fps: options.fps,
+        width: options.width,
+        height: options.height,
+        snippetCount: snippets.length,
+        ttsEnabled,
+        bgmEnabled
+      })
+
+      frameValidator.reset()
+      let blackFrameValidationCount = 0
+
+      for (let i = 0; i < snippets.length; i++) {
+        this.checkAborted()
+
+        if (contextLost) {
+          contextRestoreAttempts++
+          if (contextRestoreAttempts > MAX_CONTEXT_RESTORE_ATTEMPTS) {
+            this.logger.error('Max context restore attempts reached, aborting')
+            throw new Error(
+              'Canvas WebGL context was lost and could not be restored after multiple attempts'
+            )
+          }
+
+          this.logger.warn(
+            `Context lost, attempting restore (${contextRestoreAttempts}/${MAX_CONTEXT_RESTORE_ATTEMPTS})...`
+          )
+
+          const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+          if (gl && gl.isContextLost()) {
+            const webglContext = gl as WebGLRenderingContext
+            const ext = webglContext.getExtension('WEBGL_lose_context')
+            if (ext) {
+              ext.restoreContext()
+            }
+          }
+
+          let waitMs = 0
+          while (contextLost && waitMs < 5000) {
+            await new Promise((resolve) => setTimeout(resolve, 200))
+            waitMs += 200
+          }
+
+          if (contextLost) {
+            this.logger.error('Context could not be restored within timeout')
+            throw new Error('Canvas WebGL context was lost during recording')
+          }
+
+          this.logger.info('Context restored, continuing recording')
+        }
+
+        const snippet = snippets[i]
+        const isTalk = snippet.type === 'Talk'
+        const talkData = isTalk
+          ? (snippet as { data?: { speaker?: string; content?: string } }).data
+          : undefined
+
+        if (ttsEnabled && isTalk) {
+          const ttsResult = await concurrentPipeline.waitForTTSReady(i)
+          if (ttsResult && ttsResult.success && ttsResult.duration > 0) {
+            const timelineEntry = timeline[i]
+            const oldDurationMs = timelineEntry?.durationMs ?? 0
+            const newDurationMs = Math.max(oldDurationMs, ttsResult.duration + 200)
+            const durationDelta = newDurationMs - oldDurationMs
+
+            timeline[i] = {
+              ...timelineEntry,
+              ttsDurationMs: ttsResult.duration,
+              hasTTS: true,
+              durationMs: newDurationMs,
+              endTimeMs: (timelineEntry?.startTimeMs ?? 0) + newDurationMs
+            }
+
+            if (durationDelta > 0) {
+              for (let j = i + 1; j < timeline.length; j++) {
+                timeline[j] = {
+                  ...timeline[j],
+                  startTimeMs: (timeline[j]?.startTimeMs ?? 0) + durationDelta,
+                  endTimeMs: (timeline[j]?.endTimeMs ?? 0) + durationDelta
+                }
+              }
+            }
+
+            const rawAudioBuffer = this.app.ttsManager.getAudioBufferForSnippet(i)
+            if (rawAudioBuffer) {
+              ttsAudioResults.set(i, {
+                audioBuffer: rawAudioBuffer,
+                durationMs: ttsResult.duration,
+                characterName: talkData?.speaker ?? '',
+                text: talkData?.content ?? '',
+                preDecoded: false
+              })
+            }
+          }
+        }
+
+        const timelineEntry = timeline[i]
+        const pct = 30 + Math.round(((i + 1) / totalSnippets) * 60)
+
+        if (progressFill) progressFill.style.width = `${pct}%`
+        if (exportStatus) {
+          const ttsStatus =
+            ttsEnabled && isTalk ? (concurrentPipeline.isTTSReady(i) ? '✓' : '⏳') : ''
+          if (exportStatus)
+            exportStatus.textContent = `渲染中… ${i + 1}/${totalSnippets} ${ttsStatus}`
+        }
+
+        onProgress({
+          stage: 'capturing',
+          current: i + 1,
+          total: totalSnippets,
+          message: `处理片段 ${i + 1}/${totalSnippets}`,
+          percentage: pct
+        })
+
+        this.app.lastSnippetActualDurationMs =
+          timelineEntry?.durationMs ??
+          Math.max(Math.round(snippet.delay * 1000), estimateSnippetDuration(snippet))
+
+        timestampRecorder.markSnippetStart(i, snippet.type, {
+          speaker: talkData?.speaker,
+          content: talkData?.content
+        })
+
+        // 渲染片段 - 片段间的延迟由 snippet.delay 控制，不由帧率控制器控制
+        await this.app.snippetStrategyManager.handleSnippetForExport(snippet)
+
+        if (i < 5 || (i + 1) % 30 === 0) {
+          const frameValidation = frameValidator.validateFrame(canvas, i)
+          if (!frameValidation.isValid && frameValidation.error) {
+            throw new Error(
+              `Rendering validation failed at snippet ${i + 1}: ${frameValidation.error}. ` +
+                `Brightness: ${frameValidation.brightness.toFixed(2)}%. ` +
+                `Aborting export to prevent black screen video output.`
+            )
+          }
+          if (frameValidation.isBlackScreen) {
+            blackFrameValidationCount++
+            this.logger.warn(
+              `Black frame detected at snippet ${i + 1} (count: ${blackFrameValidationCount})`
+            )
+            if (blackFrameValidationCount >= 5) {
+              throw new Error(
+                `Detected ${blackFrameValidationCount} black frames during export. ` +
+                  `Models are not rendering. Aborting to prevent empty video output.`
+              )
+            }
+          } else {
+            blackFrameValidationCount = 0
+          }
+        }
+
+        const ttsDur = ttsAudioResults.get(i)?.durationMs
+        timestampRecorder.markSnippetEnd(ttsDur)
+
+        if (i % 50 === 0) {
+          this.logger.info(
+            `Snippet ${i}: type=${snippet.type}, duration=${timelineEntry?.durationMs}ms, ttsReady=${ttsEnabled && isTalk ? concurrentPipeline.isTTSReady(i) : 'N/A'}`
+          )
+        }
+
+        // 优化: 更频繁地让出主线程，但批量处理
+        if (i % 30 === 0) {
+          await this.yieldToBrowser()
+        }
+      }
+
+      concurrentPipeline.markRenderEnd()
+      timestampRecorder.logSummary()
+
+      videoFilePath = await recorder.stopRecordingToDisk()
+      this.logger.info(`Video recorded to disk: ${videoFilePath}`)
+
+      onProgress({
+        stage: 'saving',
+        current: 1,
+        total: 1,
+        message: '正在保存视频...',
+        percentage: 95
+      })
+
+      if (exportStatus) exportStatus.textContent = '正在保存视频...'
+
+      this.logger.info('Phase 3: Audio mixing and final assembly')
+
+      const actualVideoDurationMs = timestampRecorder.getTotalVideoDurationMs()
+      const recordingDurationMs = performance.now() - startTime
+      totalDurationMs = Math.max(actualVideoDurationMs, recordingDurationMs) + 500
+
+      const hasTtsTracks = ttsEnabled && ttsAudioResults.size > 0
+      this.logger.info(
+        `Audio check: ttsEnabled=${ttsEnabled}, ttsAudioResults=${ttsAudioResults.size}, hasTtsTracks=${hasTtsTracks}`
+      )
+
+      if (isApiMode) {
+        if (!videoFilePath) {
+          throw new Error('Video file path is not available after recording')
+        }
+        await this.saveApiVideoFromDisk(
+          options,
+          videoFilePath,
+          hasTtsTracks,
+          bgmBuffer,
+          bgmEnabled,
+          audioMuxer,
+          totalDurationMs,
+          exportStatus,
+          onProgress,
+          ttsAudioResults,
+          timestampRecorder
+        )
+      } else if (hasTtsTracks || (bgmBuffer && bgmEnabled)) {
+        if (hasTtsTracks) {
+          this.logger.info(
+            `Mixing ${ttsAudioResults.size} audio tracks using timestamp-based placement...`
+          )
+          if (exportStatus)
+            exportStatus.textContent = `正在混合音频 (${ttsAudioResults.size} 条音轨)...`
+
+          const audioPlacements = timestampRecorder.buildAudioTrackPlacements(ttsAudioResults)
+
+          for (const placement of audioPlacements) {
+            audioMuxer.addAudioTrack({
+              audioBuffer: placement.audioBuffer,
+              pcmData: placement.pcmData,
+              startTime: placement.startTimeMs,
+              endTime: placement.endTimeMs,
+              characterName: placement.characterName,
+              text: placement.text
+            })
+            this.logger.info(
+              `Audio placed: "${placement.characterName}" at ${placement.startTimeMs}ms → ${placement.endTimeMs}ms (ttsDur=${placement.endTimeMs - placement.startTimeMs}ms)`
+            )
+          }
+        } else {
+          this.logger.info('No TTS tracks, BGM only mode')
+          if (exportStatus) exportStatus.textContent = '正在添加背景音乐...'
+        }
+
+        this.logger.info(
+          `Audio mixing: outputDuration=${totalDurationMs}ms, bgmBuffer=${bgmBuffer ? 'loaded' : 'none'}, bgmEnabled=${bgmEnabled}`
+        )
+        const mixedAudioBuffer = await audioMuxer.mixAudioTracks(
+          totalDurationMs,
+          bgmBuffer || undefined
+        )
+        const wavBuffer = await audioMuxer.audioBufferToWav(mixedAudioBuffer)
+
+        this.logger.info(
+          `WAV buffer size: ${(wavBuffer.byteLength / 1024).toFixed(1)} KB, duration: ${(mixedAudioBuffer.duration * 1000).toFixed(0)}ms`
+        )
+
+        if (exportStatus) exportStatus.textContent = '正在写入临时文件...'
+        const audioTempPath = await window.electron.ipcRenderer.invoke('electron:write-temp-file', {
+          data: wavBuffer,
+          prefix: 'mss-audio',
+          extension: 'wav'
+        })
+
+        this.logger.info(`Temp files: video=${videoFilePath}, audio=${audioTempPath}`)
+
+        if (exportStatus) exportStatus.textContent = '正在合并音视频...'
+        await window.electron.ipcRenderer.invoke('electron:merge-video-audio-files', {
+          videoPath: videoFilePath,
+          audioPath: audioTempPath,
+          gpuRenderer: options.gpuRenderer || 'auto',
+          crf: options.crf ?? 18
+        })
+      } else {
+        this.logger.info('No audio to export (TTS and BGM both disabled)')
+
+        if (exportStatus) exportStatus.textContent = '正在编码视频...'
+        await window.electron.ipcRenderer.invoke('electron:convert-video-file', {
+          videoPath: videoFilePath,
+          gpuRenderer: options.gpuRenderer || 'auto',
+          crf: options.crf ?? 18
+        })
+      }
+
+      const result = {
+        success: true,
+        duration: (performance.now() - startTime) / 1000,
+        frameCount: Math.round((totalDurationMs / 1000) * options.fps)
+      }
+
+      this.logger.info('Concurrent stream recording completed successfully', result)
+
+      if (!isApiMode) {
+        await this.showCompletionMessage(progressFill!, exportStatus!, onProgress)
+      }
+
+      return result
+    } catch (error) {
+      this.logger.error('Concurrent stream recording failed', error)
+      throw error
+    } finally {
+      canvas.removeEventListener('webglcontextlost', handleContextLost)
+      canvas.removeEventListener('webglcontextrestored', handleContextRestored)
+      await concurrentPipeline.dispose()
+      recorder.dispose()
+      audioMuxer.dispose()
+      this.app.ttsManager?.clearAudioTracks()
+    }
+  }
+
+  private async prepareStreamRecording(
+    options: VideoExportOptions,
+    _progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<{ canvas: HTMLCanvasElement; snippets: SnippetData[] }> {
+    const isApiMode = options.apiMode === true
+
+    AnimationManager.setExportMode(true)
+    AnimationManager.exportSpeedMultiplier = 1
+    AnimationManager.exportTargetFPS = options.fps
+
+    if (isApiMode) {
+      this.logger.info('API mode: skipping story reload, using pre-initialized story data')
+    } else {
+      const { story } = await this.getStoryData()
+      this.checkAborted()
+
+      await this.app.initializeManagers(story)
+      this.app.initializeRenderer(2, true)
+      await this.yieldToBrowser()
+
+      onProgress({
+        stage: 'loading',
+        current: 0,
+        total: 1,
+        message: '正在加载资源...',
+        percentage: 0
+      })
+
+      if (exportStatus) exportStatus.textContent = '正在加载资源...'
+      await this.app.preloadStoryAssets()
+      this.app.initializeLayers()
+      await this.yieldToBrowser()
+      this.checkAborted()
+    }
+
+    const canvas = this.app.pixiApplication.view as HTMLCanvasElement
+    this.logger.info(`Canvas size: ${canvas.width}x${canvas.height}`)
+
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw ExportError.invalidCanvas(canvas.width, canvas.height)
+    }
+
+    const snippets = this.app.storyManager.snippets
+
+    this.logger.info('Performing pre-export WebGL validation...')
+    if (exportStatus) exportStatus.textContent = '正在验证渲染环境...'
+
+    const validationResult = await webGLValidator.validateCanvas(canvas)
+    if (!validationResult.success) {
+      const errorDetails = validationResult.errors.join('; ')
+      this.logger.error('WebGL validation failed before export:', validationResult)
+      throw new Error(
+        `WebGL rendering validation failed: ${errorDetails}. ` +
+          `Please check GPU drivers, model files, and rendering environment. ` +
+          `GPU: ${validationResult.contextInfo.renderer || 'unknown'}`
+      )
+    }
+
+    this.logger.info('Validating model rendering output...')
+    if (exportStatus) exportStatus.textContent = '正在验证模型渲染...'
+
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const modelValidation = await webGLValidator.validateModelRendering(canvas, 3000)
+    if (!modelValidation.success) {
+      throw new Error(
+        `Model rendering validation failed: black screen detected ` +
+          `(brightness: ${modelValidation.averageBrightness.toFixed(2)}%). ` +
+          `Models are not rendering properly. Check WebGL context and model files.`
+      )
+    }
+
+    this.logger.info('Pre-export validation passed')
+
+    return { canvas, snippets }
+  }
+
+  private async initializeExport(
+    _options: VideoExportOptions,
+    _progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<void> {
+    this.logger.info('Initializing export')
+
+    onProgress({
+      stage: 'initializing',
+      current: 0,
+      total: 1,
+      message: '正在初始化渲染器…',
+      percentage: 0
+    })
+
+    if (exportStatus) exportStatus.textContent = '正在初始化渲染器…'
+    await this.yieldToBrowser()
+  }
+
+  private async prepareRendering(
+    options: VideoExportOptions,
+    _progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<{
+    canvas: HTMLCanvasElement
+    framesDir: string
+    totalSnippets: number
+    startSnippetIndex: number
+    startFrameIndex: number
+  }> {
+    const isApiMode = options.apiMode === true
+
+    AnimationManager.setExportMode(true)
+    AnimationManager.exportSpeedMultiplier = 1
+    AnimationManager.exportTargetFPS = options.fps
+
+    this.logger.info('Animation speed multiplier: 1x')
+
+    if (isApiMode) {
+      this.logger.info('API mode: skipping story reload, using pre-initialized story data')
+    } else {
+      const { story } = await this.getStoryData()
+      this.checkAborted()
+
+      await this.app.initializeManagers(story)
+      this.app.initializeRenderer(1, true)
+      await this.yieldToBrowser()
+
+      this.logger.info('Loading assets')
+      onProgress({
+        stage: 'loading',
+        current: 0,
+        total: 1,
+        message: '正在加载资源…',
+        percentage: 0
+      })
+
+      if (exportStatus) exportStatus.textContent = '正在加载资源…'
+      await this.app.preloadStoryAssets()
+      this.app.initializeLayers()
+      await this.yieldToBrowser()
+      this.checkAborted()
+    }
+
+    const canvas = this.app.pixiApplication.view as HTMLCanvasElement
+    this.logger.info(`Canvas size: ${canvas.width}x${canvas.height}`)
+
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw ExportError.invalidCanvas(canvas.width, canvas.height)
+    }
+
+    onProgress({
+      stage: 'capturing',
+      current: 0,
+      total: 1,
+      message: '正在捕获帧…',
+      percentage: 0
+    })
+
+    if (exportStatus) exportStatus.textContent = '正在准备流式编码…'
+    await this.yieldToBrowser()
+    await this.requestAnimationFrameOnce()
+
+    const framesDir = await window.electron.ipcRenderer.invoke('electron:get-temp-dir')
+    this.logger.info(`Temp frames directory: ${framesDir}`)
+
+    const snippets = this.app.storyManager.snippets
+    const totalSnippets = snippets.length
+
+    let startSnippetIndex = 0
+    let startFrameIndex = 0
+
+    if (options.enableResumable !== false && this.checkpointManager.hasCheckpoint()) {
+      const checkpoint = this.checkpointManager.loadCheckpoint()
+      if (checkpoint && this.checkpointManager.canResume(totalSnippets)) {
+        this.logger.info('Resuming from checkpoint', checkpoint)
+        startSnippetIndex = checkpoint.lastSnippetIndex
+        startFrameIndex = checkpoint.lastFrameIndex
+      }
+    }
+
+    return {
+      canvas,
+      framesDir,
+      totalSnippets,
+      startSnippetIndex,
+      startFrameIndex
+    }
+  }
+
+  private async captureAndEncodeFrames(
+    options: VideoExportOptions,
+    canvas: HTMLCanvasElement,
+    framesDir: string,
+    totalSnippets: number,
+    startSnippetIndex: number,
+    startFrameIndex: number,
+    progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<ExportResult> {
+    const captureStartTime = performance.now()
+    const snippets = this.app.storyManager.snippets
+    let frameIndex = startFrameIndex
+    let capturedFrames = 0
+
+    const jpegQuality = this.getJpegQuality(options.quality)
+    const batchSize = options.batchSize || VideoExportManager.DEFAULT_BATCH_SIZE
+
+    const capturer = new AsyncFrameCapturer(this.logger, {
+      width: options.width,
+      height: options.height,
+      quality: jpegQuality,
+      batchSize,
+      framesDir,
+      maxQueueSize: 60,
+      concurrentCaptures: 8
+    })
+
+    await capturer.initialize(canvas)
+
+    const ttsEnabled = this.app.ttsManager?.isTTSEnabled() ?? false
+    const bgmConfig = this.app.ttsManager?.getBGMConfig()
+    const bgmEnabled = bgmConfig?.enabled ?? false
+    const audioMuxer = new AudioMuxer()
+    if (ttsEnabled || bgmEnabled) {
+      await audioMuxer.initialize()
+    }
+
+    let bgmBuffer: AudioBuffer | null = null
+    if (bgmEnabled && bgmConfig) {
+      audioMuxer.setBGMConfig(bgmConfig)
+      try {
+        let bgmPath = bgmConfig.path
+        if (bgmPath.startsWith('resources/builtin/')) {
+          const relativePath = bgmPath.replace('resources/builtin/', '')
+          bgmPath = builtinResourceUrl(relativePath)
+        }
+        this.logger.info(`Loading BGM from: ${bgmPath}`)
+        bgmBuffer = await audioMuxer.loadBGMBuffer(bgmPath)
+        this.logger.info(
+          `BGM loaded: ${bgmBuffer ? 'success' : 'failed'}, duration: ${bgmBuffer ? bgmBuffer.duration.toFixed(2) : 0}s`
+        )
+      } catch (error) {
+        this.logger.warn(`Failed to load BGM: ${error}`)
+      }
+    }
+
+    let timeline: SnippetTimelineEntry[] = []
+
+    timeline = this.app.ttsManager.buildTimelineWithoutTTS(snippets)
+    this.app.ttsManager.setTimeline(timeline)
+
+    this.logger.info(
+      'Phase 2: High-concurrency async rendering — Frame Capture + Snippet execution',
+      {
+        totalSnippets,
+        startIndex: startSnippetIndex,
+        fps: options.fps,
+        ttsEnabled,
+        bgmEnabled
+      }
+    )
+
+    const timestampRecorder = new SnippetTimestampRecorder()
+    timestampRecorder.markRenderStart()
+
+    const ttsAudioResults = new Map<
+      number,
+      {
+        audioBuffer: ArrayBuffer
+        pcmData?: {
+          channel0: Float32Array
+          channel1: Float32Array
+          sampleRate: number
+        }
+        durationMs: number
+        characterName: string
+        text: string
+        preDecoded: boolean
+      }
+    >()
+
+    let ttsPromise: Promise<void> | null = null
+
+    if (ttsEnabled) {
+      this.logger.info('Starting TTS synthesis in background')
+      if (exportStatus) exportStatus.textContent = '启动语音合成（后台运行）…'
+
+      ttsPromise = (async () => {
+        await this.app.ttsManager.preSynthesizeAll(snippets, (current, total, message) => {
+          this.logger.info(`[TTS Background] ${current}/${total}: ${message}`)
+        })
+        this.logger.info('TTS background synthesis completed')
+      })()
+    }
+
+    try {
+      for (let i = startSnippetIndex; i < snippets.length; i++) {
+        this.checkAborted()
+
+        const snippet = snippets[i]
+        const timelineEntry = timeline[i]
+        const safeTotal = totalSnippets || 1
+        const pct = 10 + Math.round(((i + 1) / safeTotal) * 80)
+
+        if (progressFill) progressFill.style.width = `${pct}%`
+        if (exportStatus) exportStatus.textContent = `渲染中… ${i + 1}/${totalSnippets}`
+
+        onProgress({
+          stage: 'capturing',
+          current: i + 1,
+          total: totalSnippets,
+          message: `处理片段 ${i + 1}/${totalSnippets}`,
+          percentage: pct
+        })
+
+        this.app.lastSnippetActualDurationMs =
+          timelineEntry?.durationMs ??
+          Math.max(Math.round(snippet.delay * 1000), estimateSnippetDuration(snippet))
+
+        const isTalk = snippet.type === 'Talk'
+        const talkData = isTalk
+          ? (snippet as { data?: { speaker?: string; content?: string } }).data
+          : undefined
+
+        timestampRecorder.markSnippetStart(i, snippet.type, {
+          speaker: talkData?.speaker,
+          content: talkData?.content
+        })
+
+        const framesForSnippet = await this.processSnippetFrames(
+          snippet,
+          i,
+          options.fps,
+          canvas,
+          capturer
+        )
+
+        frameIndex += framesForSnippet
+        capturedFrames += framesForSnippet
+
+        timestampRecorder.markSnippetEnd()
+
+        if (capturedFrames % 50 === 0) {
+          this.checkpointManager.saveCheckpoint({
+            lastSnippetIndex: i,
+            lastFrameIndex: frameIndex,
+            totalFramesCaptured: capturedFrames,
+            timestamp: Date.now(),
+            exportOptions: {
+              fps: options.fps,
+              quality: options.quality,
+              width: options.width,
+              height: options.height
+            }
+          })
+        }
+
+        if (i % 20 === 0) {
+          await this.yieldToBrowser()
+        }
+      }
+    } catch (error) {
+      this.logger.error('Frame capture loop failed, cleaning up resources', error)
+      try {
+        await capturer.dispose()
+      } catch {
+        /* cleanup */
+      }
+      audioMuxer.dispose()
+      if (ttsEnabled) {
+        this.app.ttsManager?.clearAudioTracks()
+      }
+      throw error
+    }
+
+    timestampRecorder.logSummary()
+
+    await capturer.flushAll()
+
+    this.logger.info(`Frame capture completed: ${capturedFrames} frames`)
+
+    if (ttsEnabled && ttsPromise) {
+      this.logger.info('Waiting for TTS synthesis to complete...')
+      if (exportStatus) exportStatus.textContent = '等待语音合成完成…'
+      await ttsPromise
+      this.logger.info('TTS synthesis finished')
+
+      const ttsDurations = this.app.ttsManager.getPreSynthesizedTtsDurations()
+      const audioTracks = this.app.ttsManager.getAudioTracks()
+      let talkIdx = 0
+
+      for (let i = 0; i < snippets.length; i++) {
+        if (snippets[i].type === 'Talk') {
+          const duration = ttsDurations.get(i) ?? timeline[i]?.durationMs ?? 0
+          const track = audioTracks[talkIdx]
+
+          if (track) {
+            ttsAudioResults.set(i, {
+              audioBuffer: track.audioBuffer,
+              durationMs: duration,
+              characterName: track.characterName,
+              text: track.text,
+              preDecoded: false
+            })
+          }
+
+          talkIdx++
+        }
+      }
+
+      this.logger.info(`Collected ${ttsAudioResults.size} TTS audio tracks after synthesis`)
+    }
+
+    const actualVideoDurationMs = timestampRecorder.getTotalVideoDurationMs()
+    const videoDurationMs = (frameIndex / options.fps) * 1000
+    const lastTimelineEntry = timeline[timeline.length - 1]
+    const totalDurationMs =
+      Math.max(lastTimelineEntry?.endTimeMs ?? 0, videoDurationMs, actualVideoDurationMs) + 500
+
+    const hasTtsTracks = ttsEnabled && ttsAudioResults.size > 0
+    let wavData: Uint8Array | null = null
+
+    this.logger.info('Phase 3: Audio mixing', {
+      hasTtsTracks,
+      ttsCount: ttsAudioResults.size,
+      bgmEnabled
+    })
+
+    if ((hasTtsTracks || (bgmBuffer && bgmEnabled)) && (ttsEnabled || bgmEnabled)) {
+      if (hasTtsTracks) {
+        if (exportStatus)
+          exportStatus.textContent = `正在混合音频 (${ttsAudioResults.size} 条音轨)...`
+
+        const audioPlacements = timestampRecorder.buildAudioTrackPlacements(ttsAudioResults)
+
+        for (const placement of audioPlacements) {
+          audioMuxer.addAudioTrack({
+            audioBuffer: placement.audioBuffer,
+            startTime: placement.startTimeMs,
+            endTime: placement.endTimeMs,
+            characterName: placement.characterName,
+            text: placement.text
+          })
+          this.logger.info(
+            `Audio placed: "${placement.characterName}" at ${placement.startTimeMs}ms → ${placement.endTimeMs}ms`
+          )
+        }
+      } else if (bgmEnabled) {
+        if (exportStatus) exportStatus.textContent = '正在添加背景音乐...'
+      }
+
+      this.logger.info(
+        `Audio mixing: outputDuration=${totalDurationMs}ms, tracks=${ttsAudioResults.size}, bgm=${!!bgmBuffer}`
+      )
+      const mixedAudioBuffer = await audioMuxer.mixAudioTracks(
+        totalDurationMs,
+        bgmBuffer || undefined
+      )
+      const wavBuffer = await audioMuxer.audioBufferToWav(mixedAudioBuffer)
+      wavData = new Uint8Array(wavBuffer)
+      this.logger.info(`WAV buffer prepared: ${(wavBuffer.byteLength / 1024).toFixed(1)} KB`)
+    }
+
+    onProgress({
+      stage: 'encoding',
+      current: frameIndex,
+      total: frameIndex,
+      message: '正在编码视频…',
+      percentage: 95
+    })
+
+    if (exportStatus) exportStatus.textContent = '正在编码视频…'
+    await this.sleep(200)
+
+    onProgress({
+      stage: 'saving',
+      current: frameIndex,
+      total: frameIndex,
+      message: '正在保存视频…',
+      percentage: 98
+    })
+
+    if (exportStatus) exportStatus.textContent = '正在保存视频…'
+
+    await this.encodeAndSaveVideo(framesDir, frameIndex, options, wavData ?? undefined)
+    this.checkAborted()
+
+    this.checkpointManager.clearCheckpoint()
+    audioMuxer.dispose()
+    if (ttsEnabled) {
+      this.app.ttsManager?.clearAudioTracks()
+    }
+    await capturer.dispose()
+
+    this.logger.info('Frame capture summary', {
+      totalFrames: capturedFrames,
+      capturerStats: capturer.stats
+    })
+
+    return {
+      success: true,
+      duration: (performance.now() - captureStartTime) / 1000,
+      frameCount: capturedFrames
+    }
+  }
+
+  private getJpegQuality(quality: 'draft' | 'standard' | 'high'): number {
+    switch (quality) {
+      case 'draft':
+        return 0.7
+      case 'standard':
+        return 0.8
+      case 'high':
+      default:
+        return 0.85
+    }
+  }
+
+  private async showCompletionMessage(
+    progressFill: HTMLDivElement | null,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback
+  ): Promise<void> {
+    if (progressFill) progressFill.style.width = '100%'
+
+    onProgress({
+      stage: 'complete',
+      current: 1,
+      total: 1,
+      message: '视频已保存！',
+      percentage: 100
+    })
+
+    if (exportStatus) exportStatus.textContent = '视频已保存！'
+    await this.sleep(1500)
+  }
+
+  private async handleExportError(
+    error: unknown,
+    exportStatus: HTMLElement | null,
+    _startTime: number
+  ): Promise<ExportResult> {
+    this.logger.error('Export failed', error)
+
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    const errorCode = error instanceof ExportError ? error.code : ExportErrorCode.UNKNOWN
+
+    if (errorCode === ExportErrorCode.CANCELLED) {
+      if (exportStatus) exportStatus.textContent = '导出已取消'
+    } else if (errorCode === ExportErrorCode.TIMEOUT) {
+      if (exportStatus) exportStatus.textContent = '导出超时，请尝试减少片段数或降低分辨率'
+    } else {
+      if (exportStatus) exportStatus.textContent = `导出失败: ${errorMsg.substring(0, 50)}`
+    }
+
+    throw error
+  }
+
+  private cleanup(): void {
+    AnimationManager.setExportMode(false)
+    AnimationManager.exportSpeedMultiplier = 1
+    this.app.exporting = false
+    this.app.lastSnippetActualDurationMs = 0
+
+    this.app.ttsManager?.clearAudioTracks()
+
+    Ticker.shared.stop()
+
+    const overlay = document.getElementById('export-overlay')
+    if (overlay) {
+      overlay.hidden = true
+    }
+
+    this.logger.info('Export cleanup completed, Ticker stopped to reduce GPU idle usage')
+  }
+
+  private async getStoryData(): Promise<{ story: SelectStoryResponse }> {
+    const loadBuiltinResult = await window.electron.ipcRenderer.invoke(
+      'electron:load-builtin-story'
+    )
+
+    if (loadBuiltinResult.success) {
+      return { story: loadBuiltinResult }
+    }
+
+    const selectResult = await window.electron.ipcRenderer.invoke(
+      'electron:select-story-file-until-selected'
+    )
+
+    if (!selectResult.success) {
+      if (selectResult.zodIssueMessage) {
+        throw new Error(selectResult.zodIssueMessage)
+      }
+      throw selectResult.error
+    }
+
+    return { story: selectResult }
+  }
+
+  private async encodeAndSaveVideo(
+    framesDir: string,
+    frameCount: number,
+    options: VideoExportOptions,
+    audioData?: Uint8Array
+  ): Promise<void> {
+    const startTime = performance.now()
+    this.logger.info(
+      `Starting video encoding: ${frameCount} frames, ${options.fps}fps, format=${options.format}, quality=${options.quality}, gpuRenderer=${options.gpuRenderer || 'auto'}, hasAudio=${!!audioData}`
+    )
+
+    let audioFilePath: string | undefined
+    if (audioData && audioData.byteLength > 0) {
+      audioFilePath = await window.electron.ipcRenderer.invoke('electron:write-temp-file', {
+        data: audioData.buffer.slice(
+          audioData.byteOffset,
+          audioData.byteOffset + audioData.byteLength
+        ),
+        prefix: 'mss-audio',
+        extension: 'wav'
+      })
+      this.logger.info(
+        `Audio temp file: ${audioFilePath}, size=${(audioData.byteLength / 1024).toFixed(1)} KB`
+      )
+    }
+
+    await window.electron.ipcRenderer.invoke('electron:hyperframes-save-video', {
+      framesDir,
+      frameCount,
+      keyFrameCount: 0,
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      totalDuration: frameCount / options.fps,
+      gpuRenderer: options.gpuRenderer || 'auto',
+      audioFilePath
+    })
+
+    const encodeTime = ((performance.now() - startTime) / 1000).toFixed(2)
+    this.logger.info(`Video encoding completed in ${encodeTime}s`)
+  }
+
+  private async saveApiVideoFromDisk(
+    options: VideoExportOptions,
+    videoFilePath: string,
+    hasTtsTracks: boolean,
+    bgmBuffer: AudioBuffer | null,
+    bgmEnabled: boolean,
+    audioMuxer: AudioMuxer,
+    totalDurationMs: number,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback,
+    ttsAudioResults: Map<
+      number,
+      {
+        audioBuffer: ArrayBuffer
+        pcmData?: {
+          channel0: Float32Array
+          channel1: Float32Array
+          sampleRate: number
+        }
+        durationMs: number
+        characterName: string
+        text: string
+        preDecoded: boolean
+      }
+    >,
+    timestampRecorder: SnippetTimestampRecorder
+  ): Promise<void> {
+    const crf = options.apiCrf ?? 23
+    const audioBitrate = options.apiAudioBitrate ?? '128k'
+    const outputPath = options.apiOutputPath ?? ''
+
+    this.logger.info(
+      `API save from disk: videoPath=${videoFilePath}, outputPath=${outputPath}, crf=${crf}`
+    )
+
+    let audioFilePath: string | undefined
+
+    if (hasTtsTracks || (bgmBuffer && bgmEnabled)) {
+      if (exportStatus) exportStatus.textContent = 'API: 正在混合音频...'
+      onProgress({
+        stage: 'saving',
+        current: 1,
+        total: 2,
+        message: 'API: 正在混合音频...',
+        percentage: 96
+      })
+
+      if (hasTtsTracks) {
+        this.logger.info(
+          `API: Mixing ${ttsAudioResults.size} audio tracks using timestamp-based placement...`
+        )
+        const audioPlacements = timestampRecorder.buildAudioTrackPlacements(ttsAudioResults)
+
+        for (const placement of audioPlacements) {
+          audioMuxer.addAudioTrack({
+            audioBuffer: placement.audioBuffer,
+            pcmData: placement.pcmData,
+            startTime: placement.startTimeMs,
+            endTime: placement.endTimeMs,
+            characterName: placement.characterName,
+            text: placement.text
+          })
+          this.logger.info(
+            `API Audio placed: "${placement.characterName}" at ${placement.startTimeMs}ms → ${placement.endTimeMs}ms`
+          )
+        }
+      }
+
+      const mixedAudioBuffer = await audioMuxer.mixAudioTracks(
+        totalDurationMs,
+        bgmBuffer || undefined
+      )
+      const wavBuffer = await audioMuxer.audioBufferToWav(mixedAudioBuffer)
+
+      this.logger.info(`API: Audio mixed, size=${(wavBuffer.byteLength / 1024).toFixed(1)} KB`)
+
+      audioFilePath = await window.electron.ipcRenderer.invoke('electron:write-temp-file', {
+        data: wavBuffer,
+        prefix: 'mss-api-audio',
+        extension: 'wav'
+      })
+      this.logger.info(`API: Audio temp file: ${audioFilePath}`)
+    }
+
+    if (exportStatus) exportStatus.textContent = 'API: 正在压缩并保存视频...'
+    onProgress({
+      stage: 'saving',
+      current: 2,
+      total: 2,
+      message: 'API: 正在压缩并保存视频...',
+      percentage: 98
+    })
+
+    const apiResult = await window.electron.ipcRenderer.invoke(
+      'electron:api-export-video-from-files',
+      {
+        videoPath: videoFilePath,
+        audioPath: audioFilePath,
+        outputPath,
+        fps: options.fps,
+        width: options.width,
+        height: options.height,
+        crf,
+        audioBitrate
+      }
+    )
+
+    if (!apiResult.success) {
+      throw new Error(`API video export failed: ${apiResult.error || 'Unknown error'}`)
+    }
+
+    this.logger.info(
+      `API: Video saved to ${apiResult.outputPath}, size=${((apiResult.fileSize || 0) / 1024 / 1024).toFixed(2)} MB`
+    )
+  }
+
+  private async saveApiVideo(
+    options: VideoExportOptions,
+    videoUint8Array: Uint8Array,
+    hasTtsTracks: boolean,
+    bgmBuffer: AudioBuffer | null,
+    bgmEnabled: boolean,
+    audioMuxer: AudioMuxer,
+    totalDurationMs: number,
+    exportStatus: HTMLElement | null,
+    onProgress: InternalProgressCallback,
+    ttsAudioResults: Map<
+      number,
+      {
+        audioBuffer: ArrayBuffer
+        pcmData?: {
+          channel0: Float32Array
+          channel1: Float32Array
+          sampleRate: number
+        }
+        durationMs: number
+        characterName: string
+        text: string
+        preDecoded: boolean
+      }
+    >,
+    timestampRecorder: SnippetTimestampRecorder
+  ): Promise<void> {
+    const crf = options.apiCrf ?? 23
+    const audioBitrate = options.apiAudioBitrate ?? '128k'
+    const outputPath = options.apiOutputPath ?? ''
+
+    this.logger.info(`API save: outputPath=${outputPath}, crf=${crf}, audioBitrate=${audioBitrate}`)
+
+    let audioData: ArrayBuffer | undefined
+
+    if (hasTtsTracks || (bgmBuffer && bgmEnabled)) {
+      if (exportStatus) exportStatus.textContent = 'API: 正在混合音频...'
+      onProgress({
+        stage: 'saving',
+        current: 1,
+        total: 2,
+        message: 'API: 正在混合音频...',
+        percentage: 96
+      })
+
+      if (hasTtsTracks) {
+        this.logger.info(
+          `API: Mixing ${ttsAudioResults.size} audio tracks using timestamp-based placement...`
+        )
+        const audioPlacements = timestampRecorder.buildAudioTrackPlacements(ttsAudioResults)
+
+        for (const placement of audioPlacements) {
+          audioMuxer.addAudioTrack({
+            audioBuffer: placement.audioBuffer,
+            pcmData: placement.pcmData,
+            startTime: placement.startTimeMs,
+            endTime: placement.endTimeMs,
+            characterName: placement.characterName,
+            text: placement.text
+          })
+          this.logger.info(
+            `API Audio placed: "${placement.characterName}" at ${placement.startTimeMs}ms → ${placement.endTimeMs}ms`
+          )
+        }
+      }
+
+      const mixedAudioBuffer = await audioMuxer.mixAudioTracks(
+        totalDurationMs,
+        bgmBuffer || undefined
+      )
+      const wavBuffer = await audioMuxer.audioBufferToWav(mixedAudioBuffer)
+      audioData = wavBuffer
+
+      this.logger.info(`API: Audio mixed, size=${(wavBuffer.byteLength / 1024).toFixed(1)} KB`)
+    }
+
+    if (exportStatus) exportStatus.textContent = 'API: 正在压缩并保存视频...'
+    onProgress({
+      stage: 'saving',
+      current: 2,
+      total: 2,
+      message: 'API: 正在压缩并保存视频...',
+      percentage: 98
+    })
+
+    const apiResult = await window.electron.ipcRenderer.invoke('electron:api-export-stream-video', {
+      videoData: videoUint8Array.buffer.slice(
+        videoUint8Array.byteOffset,
+        videoUint8Array.byteOffset + videoUint8Array.byteLength
+      ),
+      audioData: audioData,
+      outputPath,
+      fps: options.fps,
+      width: options.width,
+      height: options.height,
+      crf,
+      audioBitrate
+    })
+
+    if (!apiResult.success) {
+      throw new Error(`API video export failed: ${apiResult.error || 'Unknown error'}`)
+    }
+
+    this.logger.info(
+      `API: Video saved to ${apiResult.outputPath}, size=${((apiResult.fileSize || 0) / 1024 / 1024).toFixed(2)} MB`
+    )
+  }
+
+  destroy(): void {
+    this.abort()
+    this.checkpointManager.clearCheckpoint()
+    this.logger.info('VideoExportManager destroyed')
+  }
+}

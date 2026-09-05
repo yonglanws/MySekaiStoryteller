@@ -3,76 +3,47 @@ name: Continuous Integration
 on:
   push:
     branches:
+      - main
       - master
   pull_request:
 
 jobs:
   check-and-build:
     name: Check and Build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ubuntu-latest
     defaults:
       run:
         shell: bash
-
-    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22.x
-          cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Run checks
         run: |
-          pnpm run format:check &
-          pnpm run lint &
-          pnpm run typecheck &
-          for job in $(jobs -p); do
-            wait $job || exit 1
-          done
+          npm run typecheck
+          npm run lint
 
-      - name: Build for Windows
-        if: matrix.os == 'windows-latest'
-        run: pnpm run build:win
-
-      - name: Build for macOS
-        if: matrix.os == 'macos-latest'
-        run: pnpm run build:mac
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build for Linux
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build webrenderer and host
         run: |
-          sudo snap install snapcraft --classic
-          pnpm run build:linux
+          npm run build:web
+          npm run build:host
 
       - name: Upload build artifacts
-        if: github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}-build
+          name: host-build
           retention-days: 7
           path: |
-            dist/*.zip
-            dist/*.AppImage
-            dist/*.snap
-            dist/*.deb
-            dist/*.dmg
+            out/**
+            out-host/**
           if-no-files-found: error

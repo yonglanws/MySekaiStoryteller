@@ -16,10 +16,11 @@ import getSubLogger from '../utils/Logger'
 export default class AdvancedModel extends Live2DModel {
   public autoBlink: boolean = true
   public lastChangeBlinkTime: number | null = null
+  public readonly visualEffectManager: VisualEffectManager = new VisualEffectManager(this)
+  private blinkTimerId: ReturnType<typeof setTimeout> | null = null
 
   private _metadata: ModelData | null = null
 
-  private readonly visualEffectManager: VisualEffectManager = new VisualEffectManager(this)
   private inHologram: boolean = false
 
   private logger: Logger<ILogObj> = getSubLogger('AdvancedModel[Uninitialized]')
@@ -36,6 +37,29 @@ export default class AdvancedModel extends Live2DModel {
     }
     this.visible = true
     this.internalModel.extendParallelMotionManager(2)
+
+    this.internalModel.parallelMotionManager[0].stopAllMotions()
+    this.internalModel.parallelMotionManager[1].stopAllMotions()
+
+    const motionManager = this.internalModel.motionManager
+    const groups = motionManager.motionGroups
+    const defaultMotion = groups && groups['w-normal-default01'] ? 'w-normal-default01' : null
+    const defaultFacial = groups && groups['face_normal_01'] ? 'face_normal_01' : null
+
+    if (defaultMotion) {
+      this.internalModel.parallelMotionManager[0].startMotion(
+        defaultMotion,
+        0,
+        MotionPriority.FORCE
+      )
+    }
+    if (defaultFacial) {
+      this.internalModel.parallelMotionManager[1].startMotion(
+        defaultFacial,
+        0,
+        MotionPriority.FORCE
+      )
+    }
 
     const alpha_filter = new AlphaFilter(0)
     alpha_filter.resolution = 2
@@ -84,7 +108,8 @@ export default class AdvancedModel extends Live2DModel {
     }, time)
 
     this.lastChangeBlinkTime = Date.now()
-    setTimeout(() => this.updateAutoBlink(), getRandomNumber(4000, 6500))
+    if (this.blinkTimerId !== null) clearTimeout(this.blinkTimerId)
+    this.blinkTimerId = setTimeout(() => this.updateAutoBlink(), getRandomNumber(4000, 6500))
   }
 
   public async hide(time: number): Promise<void> {
@@ -100,6 +125,10 @@ export default class AdvancedModel extends Live2DModel {
 
     this.lastChangeBlinkTime = Date.now()
     this.autoBlink = false
+    if (this.blinkTimerId !== null) {
+      clearTimeout(this.blinkTimerId)
+      this.blinkTimerId = null
+    }
   }
 
   public async applyAndWait(
@@ -107,6 +136,12 @@ export default class AdvancedModel extends Live2DModel {
     facial?: string,
     facialFirst?: boolean
   ): Promise<void> {
+    // 确保模型已完全加载
+    if (!this.internalModel) {
+      this.logger.warn('Model not fully loaded, waiting...')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+
     const waits: Promise<void>[] = []
     const motion_manager = this.internalModel.parallelMotionManager[0]
     const facial_manager = this.internalModel.parallelMotionManager[1]
@@ -122,10 +157,38 @@ export default class AdvancedModel extends Live2DModel {
 
     await Promise.all(waits)
 
-    await AnimationManager.in_ticker(
-      () => {},
-      () => motion_manager.isFinished() && facial_manager.isFinished()
-    )
+    const isExport = AnimationManager.isExporting()
+    const timeoutMs = isExport ? 15000 : 0
+
+    if (isExport && timeoutMs > 0) {
+      const startTime = performance.now()
+      let timedOut = false
+      await AnimationManager.in_ticker(
+        () => {},
+        () => {
+          if (timedOut) return true
+          if (performance.now() - startTime > timeoutMs) {
+            this.logger.warn(
+              `applyAndWait timed out after ${timeoutMs}ms, forcing continue. motion=${motion}, facial=${facial}`
+            )
+            timedOut = true
+            try {
+              motion_manager.stopAllMotions()
+              facial_manager.stopAllMotions()
+            } catch (e) {
+              this.logger.warn('Failed to stop motions after timeout', e)
+            }
+            return true
+          }
+          return motion_manager.isFinished() && facial_manager.isFinished()
+        }
+      )
+    } else {
+      await AnimationManager.in_ticker(
+        () => {},
+        () => motion_manager.isFinished() && facial_manager.isFinished()
+      )
+    }
 
     this.lastChangeBlinkTime = Date.now()
   }
@@ -140,7 +203,7 @@ export default class AdvancedModel extends Live2DModel {
     to: PositionRel,
     time_ms: number
   ): Promise<void> {
-    if (from === to) return
+    if (from.x === to.x && from.y === to.y) return
 
     const abs_from: [number, number] = [stage_size[0] * from.x, stage_size[1] * (from.y + 0.3)]
     const abs_to: [number, number] = [stage_size[0] * to.x, stage_size[1] * (to.y + 0.3)]
@@ -170,20 +233,48 @@ export default class AdvancedModel extends Live2DModel {
     if (results.includes(false)) {
       await this.applyAndWait(motion, facial)
     } else {
-      await AnimationManager.in_ticker(
-        () => {},
-        () => motion_manager.isFinished() && facial_manager.isFinished()
-      )
+      const isExport = AnimationManager.isExporting()
+      const timeoutMs = isExport ? 15000 : 0
+
+      if (isExport && timeoutMs > 0) {
+        const startTime = performance.now()
+        let timedOut = false
+        await AnimationManager.in_ticker(
+          () => {},
+          () => {
+            if (timedOut) return true
+            if (performance.now() - startTime > timeoutMs) {
+              this.logger.warn(
+                `playMotionLastFrame timed out after ${timeoutMs}ms, forcing continue`
+              )
+              timedOut = true
+              try {
+                motion_manager.stopAllMotions()
+                facial_manager.stopAllMotions()
+              } catch (e) {
+                this.logger.warn('Failed to stop motions after timeout', e)
+              }
+              return true
+            }
+            return motion_manager.isFinished() && facial_manager.isFinished()
+          }
+        )
+      } else {
+        await AnimationManager.in_ticker(
+          () => {},
+          () => motion_manager.isFinished() && facial_manager.isFinished()
+        )
+      }
     }
   }
 
   public async closeEyes(time_ms: number): Promise<void> {
     await AnimationManager.linear((progress) => {
       if (this.internalModel instanceof Cubism2InternalModel) {
-        this.internalModel.eyeBlink!.setEyeParams(1 - progress)
+        this.internalModel.eyeBlink?.setEyeParams(1 - progress)
       } else if (this.internalModel instanceof Cubism4InternalModel) {
-        this.internalModel.coreModel.setParameterValueById('ParamEyeLOpen', 1 - progress)
-        this.internalModel.coreModel.setParameterValueById('ParamEyeROpen', 1 - progress)
+        this.internalModel.coreModel?.setParameterValueById('ParamEyeLOpen', 1 - progress)
+        this.internalModel.coreModel?.setParameterValueById('ParamEyeROpen', 1 - progress)
       } else {
         throw new Error('Not implement.')
       }
@@ -193,10 +284,10 @@ export default class AdvancedModel extends Live2DModel {
   public async openEyes(time_ms: number, max_value: number = 1): Promise<void> {
     await AnimationManager.linear((progress) => {
       if (this.internalModel instanceof Cubism2InternalModel) {
-        this.internalModel.eyeBlink!.setEyeParams(progress * max_value)
+        this.internalModel.eyeBlink?.setEyeParams(progress * max_value)
       } else if (this.internalModel instanceof Cubism4InternalModel) {
-        this.internalModel.coreModel.setParameterValueById('ParamEyeLOpen', progress * max_value)
-        this.internalModel.coreModel.setParameterValueById('ParamEyeROpen', progress * max_value)
+        this.internalModel.coreModel?.setParameterValueById('ParamEyeLOpen', progress * max_value)
+        this.internalModel.coreModel?.setParameterValueById('ParamEyeROpen', progress * max_value)
       } else {
         throw new Error('Not implement.')
       }
@@ -212,6 +303,11 @@ export default class AdvancedModel extends Live2DModel {
       }
 
       if (this.internalModel instanceof Cubism2InternalModel) {
+        if (!this.internalModel.coreModel) {
+          this.logger.warn('coreModel is undefined, stopping auto blink')
+          this.autoBlink = false
+          return
+        }
         if (
           this.internalModel.coreModel.getParamFloat('PARAM_EYE_L_OPEN') < 1 ||
           this.internalModel.coreModel.getParamFloat('PARAM_EYE_R_OPEN') < 1
@@ -221,6 +317,11 @@ export default class AdvancedModel extends Live2DModel {
           continue
         }
       } else if (this.internalModel instanceof Cubism4InternalModel) {
+        if (!this.internalModel.coreModel) {
+          this.logger.warn('coreModel is undefined, stopping auto blink')
+          this.autoBlink = false
+          return
+        }
         if (
           this.internalModel.coreModel.getParameterValueById('ParamEyeLOpen') < 1 ||
           this.internalModel.coreModel.getParameterValueById('ParamEyeROpen') < 1

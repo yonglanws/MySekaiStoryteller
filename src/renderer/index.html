@@ -1,44 +1,467 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <title>MySekaiStoryteller</title>
-    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: mss:; connect-src 'self' mss:; media-src mss:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: mss:; connect-src 'self' mss: http://127.0.0.1:* https://*; media-src 'self' mss: blob:"
     />
 
     <link href="./assets/main.css" type="text/css" rel="stylesheet" />
   </head>
 
   <body>
-    <h1 id="select-file-tips">Please select a story file</h1>
-    <div id="config" hidden="hidden">
-      <div class="controls-container">
-        <h1 id="configuration_label">Configuration</h1>
-        <label for="resolution">Select Resolution: </label>
-        <select id="resolution" class="option-select">
-          <option value="1280x720" selected>1280x720</option>
-          <option value="1920x1080">1920x1080</option>
-        </select>
-
-        <label for="renderScale">Rendering Quality: </label>
-        <select id="renderScale" class="option-select">
-          <option value="0.85">0.85</option>
-          <option value="0.9">0.9</option>
-          <option value="0.95">0.95</option>
-          <option value="1.0" selected>1.0</option>
-          <option value="1.25">1.25</option>
-          <option value="1.5">1.5</option>
-          <option value="1.75">1.75</option>
-          <option value="2.0">2.0</option>
-        </select>
+    <!-- 启动界面 -->
+    <div id="splash-screen">
+      <div class="splash-content">
+        <div class="splash-logo"></div>
+        <h1 class="splash-title">MySekaiStoryteller</h1>
+        <p class="splash-subtitle">世界计划 故事视频生成器</p>
+        <div class="splash-loader">
+          <div class="splash-loader-bar"></div>
+        </div>
       </div>
-      <button class="styled-button" id="apply">Apply</button>
     </div>
+
+    <h1 id="select-file-tips">请选择故事文件</h1>
+
+    <div id="config" hidden="hidden">
+      <div class="config-panel">
+        <header class="config-header">
+          <h1 id="configuration_label">视频导出配置</h1>
+          <p class="config-desc">配置你的故事视频导出参数</p>
+        </header>
+
+        <nav class="tab-bar">
+          <button class="tab-item active" data-tab="basic">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+              />
+            </svg>
+            基础设置
+          </button>
+          <button class="tab-item" data-tab="tts">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+            </svg>
+            语音合成
+          </button>
+          <button class="tab-item" data-tab="translation">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M5 8l6 6" />
+              <path d="M4 14l6-6 2-3" />
+              <path d="M2 5h12" />
+              <path d="M7 2h1" />
+              <path d="M22 22l-5-10-5 10" />
+              <path d="M14 18h6" />
+            </svg>
+            AI翻译
+          </button>
+          <button class="tab-item" data-tab="api">
+            <svg
+              class="tab-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            API服务
+          </button>
+        </nav>
+
+        <main class="tab-panels">
+          <section class="tab-panel active" id="tab-basic">
+            <div class="field">
+              <label for="resolution">分辨率</label>
+              <select id="resolution" class="select">
+                <option value="1920x1080" selected>1920×1080 (Full HD)</option>
+                <option value="1280x720">1280×720 (HD)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="renderScale">渲染质量</label>
+              <select id="renderScale" class="select">
+                <option value="0.85">0.85 (快速)</option>
+                <option value="0.9">0.9</option>
+                <option value="0.95">0.95</option>
+                <option value="1.0" selected>1.0 (标准)</option>
+                <option value="1.25">1.25</option>
+                <option value="1.5">1.5 (高质量)</option>
+                <option value="1.75">1.75</option>
+                <option value="2.0">2.0 (超高质量)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="gpuRenderer">GPU编码器</label>
+              <select id="gpuRenderer" class="select">
+                <option value="auto" selected>自动检测</option>
+                <option value="nvidia">NVIDIA NVENC</option>
+                <option value="amd">AMD AMF</option>
+                <option value="intel">Intel QSV</option>
+                <option value="cpu">CPU (libx264)</option>
+              </select>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="tab-tts">
+            <div class="field field-checkbox">
+              <input type="checkbox" id="ttsEnabled" />
+              <label for="ttsEnabled">启用语音合成</label>
+            </div>
+
+            <div class="field">
+              <label for="ttsApiUrl">TTS服务地址</label>
+              <div class="input-row">
+                <input
+                  type="text"
+                  id="ttsApiUrl"
+                  class="input"
+                  value="http://127.0.0.1:9880"
+                  placeholder="http://127.0.0.1:9880"
+                />
+                <button class="btn btn-secondary" id="testTTSBtn">测试</button>
+              </div>
+              <span class="field-hint" id="ttsTestStatus"></span>
+            </div>
+
+            <div class="field">
+              <label for="ttsRefAudio">参考音频路径</label>
+              <input
+                type="text"
+                id="ttsRefAudio"
+                class="input"
+                placeholder="例: voices/example.wav"
+              />
+            </div>
+
+            <div class="field field-checkbox">
+              <input type="checkbox" id="bgmEnabled" checked />
+              <label for="bgmEnabled">启用背景音乐</label>
+            </div>
+
+            <div class="field">
+              <label for="bgmPath">背景音乐路径</label>
+              <input
+                type="text"
+                id="bgmPath"
+                class="input"
+                value="resources/builtin/voices/bg1.mp3"
+                placeholder="例: resources/builtin/voices/bg1.mp3"
+              />
+            </div>
+
+            <div class="field">
+              <label for="bgmVolume">背景音乐音量</label>
+              <div class="range-row">
+                <input type="range" id="bgmVolume" min="0" max="1" step="0.05" value="0.1" />
+                <span class="range-value" id="bgmVolumeValue">10%</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="ttsPromptText">参考音频对应的文本</label>
+              <textarea
+                id="ttsPromptText"
+                class="input textarea"
+                placeholder="请输入参考音频的原始文本内容..."
+              ></textarea>
+            </div>
+
+            <div class="field">
+              <label for="ttsSpeedFactor">语速调节</label>
+              <div class="range-row">
+                <input
+                  type="range"
+                  id="ttsSpeedFactor"
+                  min="0.5"
+                  max="2.0"
+                  step="0.1"
+                  value="1.0"
+                />
+                <span class="range-value" id="ttsSpeedFactorValue">1.0x</span>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="ttsTextLang">文本语言</label>
+              <select id="ttsTextLang" class="select">
+                <option value="zh" selected>中文 (zh)</option>
+                <option value="ja">日文 (ja)</option>
+                <option value="en">英文 (en)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="ttsPromptLang">参考音频语言</label>
+              <select id="ttsPromptLang" class="select">
+                <option value="zh">中文 (zh)</option>
+                <option value="ja" selected>日文 (ja)</option>
+                <option value="en">英文 (en)</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="ttsGptWeights">GPT 权重文件路径</label>
+              <input
+                type="text"
+                id="ttsGptWeights"
+                class="input"
+                placeholder="例: D:\GPT-SoVITS\GPT_weights_v2\mzk.ckpt"
+              />
+              <span class="field-hint" id="ttsGptWeightsHint"></span>
+            </div>
+
+            <div class="field">
+              <label for="ttsSovitsWeights">SoVITS 权重文件路径</label>
+              <input
+                type="text"
+                id="ttsSovitsWeights"
+                class="input"
+                placeholder="例: D:\GPT-SoVITS\SoVITS_weights_v2\mzk.pth"
+              />
+              <span class="field-hint" id="ttsSovitsWeightsHint"></span>
+            </div>
+
+            <aside class="note">
+              <strong>TTS服务需要先运行GPT-SoVITS的API服务器。</strong><br />
+              命令示例：<code>python api_v2.py -a 127.0.0.1 -p 9880</code><br />
+              <strong>自定义模型：</strong>如果未设置模型路径，系统将使用默认模型。
+            </aside>
+          </section>
+
+          <section class="tab-panel" id="tab-translation">
+            <div class="field field-checkbox">
+              <input type="checkbox" id="translationEnabled" />
+              <label for="translationEnabled">启用AI翻译（中文 → 日文）</label>
+            </div>
+
+            <div class="field">
+              <label for="translationApiUrl">翻译API地址</label>
+              <div class="input-row">
+                <input
+                  type="text"
+                  id="translationApiUrl"
+                  class="input"
+                  value="https://api.openai.com/v1/chat/completions"
+                  placeholder="https://api.openai.com/v1/chat/completions"
+                />
+                <button class="btn btn-secondary" id="testTranslationBtn">测试</button>
+              </div>
+              <span class="field-hint" id="translationTestStatus"></span>
+            </div>
+
+            <div class="field">
+              <label for="translationApiKey">API Key</label>
+              <div class="input-with-action">
+                <input type="password" id="translationApiKey" class="input" placeholder="sk-..." />
+                <button class="btn-icon" id="toggleApiKey" title="显示/隐藏">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="translationModel">模型</label>
+              <select id="translationModel" class="select">
+                <option value="gpt-3.5-turbo" selected>GPT-3.5 Turbo</option>
+                <option value="gpt-4">GPT-4</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="deepseek-chat">DeepSeek Chat</option>
+                <option value="custom">自定义</option>
+              </select>
+            </div>
+
+            <div class="field" id="customModelGroup" hidden>
+              <label for="translationCustomModel">自定义模型名称</label>
+              <input type="text" id="translationCustomModel" class="input" placeholder="模型名称" />
+            </div>
+
+            <div class="field">
+              <label for="translationSystemPrompt">系统提示词</label>
+              <textarea
+                id="translationSystemPrompt"
+                class="input textarea"
+                placeholder="你是一个专业的翻译助手..."
+              ></textarea>
+            </div>
+
+            <aside class="note">
+              <strong>支持所有OpenAI兼容的API接口：</strong><br />
+              OpenAI官方 · DeepSeek · Claude (代理) · 本地LLM (Ollama)
+            </aside>
+          </section>
+
+          <section class="tab-panel" id="tab-api">
+            <div class="field">
+              <label>视频导出API</label>
+              <div class="api-status-row">
+                <span class="status-indicator" id="apiStatusIndicator"></span>
+                <span id="apiStatusText">检测中...</span>
+                <button class="btn btn-secondary btn-sm" id="refreshApiStatusBtn">刷新</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="apiPort">API服务端口</label>
+              <input type="number" id="apiPort" class="input" value="9881" min="1024" max="65535" />
+              <span class="field-hint">视频导出API服务监听端口（默认9881）</span>
+            </div>
+
+            <div class="field">
+              <label for="apiHost">API服务地址</label>
+              <input
+                type="text"
+                id="apiHost"
+                class="input"
+                value="127.0.0.1"
+                placeholder="127.0.0.1"
+              />
+              <span class="field-hint">仅本地访问使用127.0.0.1，局域网访问使用0.0.0.0</span>
+            </div>
+
+            <div class="field">
+              <label>视频参数（固定）</label>
+              <div class="fixed-params">
+                <div class="param-item">
+                  <span class="param-label">分辨率</span>
+                  <span class="param-value">1280×720 (720p)</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-label">渲染质量</span>
+                  <span class="param-value">2.0x</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-label">帧率</span>
+                  <span class="param-value">30 FPS</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-label">编码</span>
+                  <span class="param-value">H.264 CRF 23</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-label">音频</span>
+                  <span class="param-value">AAC 128kbps</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="field field-checkbox">
+              <input type="checkbox" id="remoteTtsEnabled" />
+              <label for="remoteTtsEnabled">使用独立TTS服务</label>
+            </div>
+
+            <div id="remoteTtsGroup" hidden>
+              <div class="field">
+                <label for="remoteTtsUrl">TTS服务地址</label>
+                <div class="input-row">
+                  <input
+                    type="text"
+                    id="remoteTtsUrl"
+                    class="input"
+                    value="http://127.0.0.1:9882"
+                    placeholder="http://127.0.0.1:9882"
+                  />
+                  <button class="btn btn-secondary" id="testRemoteTTSBtn">测试</button>
+                </div>
+                <span class="field-hint" id="remoteTtsTestStatus"></span>
+              </div>
+
+              <div class="field">
+                <label for="remoteTtsGptUrl">GPT-SoVITS API地址</label>
+                <input
+                  type="text"
+                  id="remoteTtsGptUrl"
+                  class="input"
+                  value="http://127.0.0.1:9880"
+                  placeholder="http://127.0.0.1:9880"
+                />
+                <span class="field-hint">TTS服务连接的GPT-SoVITS后端地址</span>
+              </div>
+            </div>
+
+            <aside class="note">
+              <strong>API服务说明：</strong><br />
+              • 视频导出API在应用启动时自动运行（端口9881）<br />
+              • TTS语音服务在应用启动时自动运行（端口9882）<br />
+              • POST <code>/api/v1/export</code> — 接收JSON剧本，返回视频<br />
+              • GET <code>/api/v1/health</code> — 健康检查<br />
+              • GET <code>/api/v1/download/:filename</code> — 下载视频<br />
+              • 两个服务独立运行，互不影响
+            </aside>
+          </section>
+        </main>
+
+        <footer class="config-actions">
+          <div class="actions-left">
+            <button class="btn btn-secondary" id="saveConfigBtn">保存设置</button>
+            <button class="btn btn-secondary btn-danger" id="resetConfigBtn">重置设置</button>
+          </div>
+          <div class="actions-right">
+            <button class="btn btn-primary" id="apply">预览播放</button>
+            <button class="btn btn-accent" id="exportBtn">生成视频</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
     <div id="app" hidden="hidden"></div>
+
+    <div id="export-overlay" hidden="hidden">
+      <div class="export-dialog">
+        <div class="export-spinner"></div>
+        <h2 class="export-title">正在渲染视频…</h2>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <p class="export-status" id="exportStatus">准备中…</p>
+      </div>
+    </div>
+
     <script type="module" src="src/index.ts"></script>
-    <!-- Live2D libraries imported at electron.vite.config.ts -->
   </body>
 </html>

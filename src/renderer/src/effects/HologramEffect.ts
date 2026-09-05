@@ -8,10 +8,12 @@ import AnimationManager from '../managers/AnimationManager'
 // Thanks lezzthanthree/SEKAI-Stories to provide a solution
 export class HologramEffect extends VisualEffect {
   private elapsed = 0
+  private animating = false
   private graphic_l: Graphics
   private graphic_s: Graphics
   private readonly crtFilter: CRTFilter
   private readonly adjustFilter: AdjustmentFilter
+  private rafId: number | null = null
 
   private readonly scaleLarge = 0.9
   private readonly scaleSmall = 0.8
@@ -40,9 +42,9 @@ export class HologramEffect extends VisualEffect {
     const animateCRT = (): void => {
       this.crtFilter.time += 0.03
       this.crtFilter.seed = Math.random()
-      requestAnimationFrame(animateCRT)
+      this.rafId = requestAnimationFrame(animateCRT)
     }
-    animateCRT()
+    this.rafId = requestAnimationFrame(animateCRT)
   }
 
   update(delta: number): void {
@@ -57,8 +59,8 @@ export class HologramEffect extends VisualEffect {
     const small = this.graphic_s
     const large = this.graphic_l
 
-    if (!this['animating']) {
-      this['animating'] = true
+    if (!this.animating) {
+      this.animating = true
 
       const startScale = small.scale.x
       const targetScale = this.scaleLarge
@@ -75,17 +77,21 @@ export class HologramEffect extends VisualEffect {
 
         small.alpha = fadeIn * normalize
         large.alpha = fadeOut * normalize
-      }, 5000).then(() => {
-        const temp = this.graphic_l
-        this.graphic_l = this.graphic_s
-        this.graphic_s = temp
+      }, 5000)
+        .then(() => {
+          const temp = this.graphic_l
+          this.graphic_l = this.graphic_s
+          this.graphic_s = temp
 
-        this.graphic_s.scale.set(this.scaleSmall)
-        this.graphic_s.alpha = 0
-        this.graphic_l.alpha = this.maxAlpha
+          this.graphic_s.scale.set(this.scaleSmall)
+          this.graphic_s.alpha = 0
+          this.graphic_l.alpha = this.maxAlpha
 
-        this['animating'] = false
-      })
+          this.animating = false
+        })
+        .catch(() => {
+          this.animating = false
+        })
     }
   }
 
@@ -109,6 +115,10 @@ export class HologramEffect extends VisualEffect {
   }
 
   destroyEffect(): void {
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = null
+    }
     this.filters = []
     this.removeChildren()
     this.destroy({ children: true })

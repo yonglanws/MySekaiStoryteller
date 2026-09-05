@@ -2,6 +2,7 @@ import { Snippet } from '../snippets/Snippet'
 import { App } from '../app/App'
 import ChangeBackgroundImageSnippet from '../snippets/ChangeBackgroundImageSnippet'
 import { SnippetData } from '../../../common/types/Story'
+import { estimateSnippetDuration } from '../utils/TimelineCalculator'
 import ChangeLayoutModeSnippet from '../snippets/ChangeLayoutModeSnippet'
 import LayoutAppearSnippet from '../snippets/LayoutAppearSnippet'
 import { ILogObj, Logger } from 'tslog'
@@ -51,6 +52,23 @@ export default class SnippetStrategyManager {
       }
     } else {
       throw new TypeError(`Not implemented ${data.type}`)
+    }
+  }
+
+  async handleSnippetForExport(data: SnippetData): Promise<void> {
+    const snippetConstructor = this.snippets[data.type]
+    if (!snippetConstructor) {
+      throw new TypeError(`Not implemented ${data.type}`)
+    }
+
+    const snippet = new snippetConstructor(this.app, data)
+    await snippet.runSnippet()
+
+    if (this.app.lastSnippetActualDurationMs === 0) {
+      this.app.lastSnippetActualDurationMs = Math.max(
+        (data.delay || 0) * 1000,
+        estimateSnippetDuration(data)
+      )
     }
   }
 }

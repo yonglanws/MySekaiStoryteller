@@ -7,12 +7,21 @@ export default tseslint.config([
       '**/node_modules',
       '**/dist',
       '**/out',
+      '**/out-host',
+      'fix_motions.js',
       'src/renderer/public/live2d.min.js',
       'src/renderer/public/live2dcubismcore.min.js'
     ]
   },
   ...tseslint.configs.recommended,
   eslintConfigPrettier,
+  {
+    // 测试/工具脚本为纯 JS，不强制 TS 风格的显式返回类型
+    files: ['scripts/**/*.mjs', 'scripts/**/*.js', '*.mjs'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   {
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]

@@ -68,6 +68,10 @@ export default class UILayer extends BaseLayer {
     this.textSprite.data = content
   }
 
+  public renderTalkContentImmediately(): void {
+    this.textSprite.text = this.textSprite.data
+  }
+
   public async showTextBackground(): Promise<void> {
     this._UITalkShowed = true
     const showDuration = 70

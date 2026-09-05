@@ -1,0 +1,409 @@
+import { chromium, Browser, Page } from 'playwright'
+import { ILogObj, Logger } from 'tslog'
+import type { HostConfig } from '../config'
+import type { WsHub, WorkerMessage } from '../bridge/wsHub'
+import type { ExportDispatcher, ExportTask } from '../servers/VideoApiServer'
+
+export interface ExportResultPayload {
+  taskId: string
+  success: boolean
+  videoPath?: string
+  duration?: number
+  frameCount?: number
+  error?: string
+}
+
+interface WorkerState {
+  workerId: string
+  browser: Browser | null
+  page: Page | null
+  ready: boolean
+  busy: boolean
+  busyTaskId: string | null
+  exportsCompleted: number
+  webglRenderer: string | null
+  launching: boolean
+}
+
+const WORKER_READY_TIMEOUT_MS = 60000
+const RELAUNCH_DELAY_MS = 30000
+
+function baseLaunchArgs(config: HostConfig): string[] {
+  const args = [
+    '--autoplay-policy=no-user-gesture-required',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-dev-shm-usage',
+    '--force-color-profile=srgb'
+  ]
+
+  if (process.platform === 'linux') {
+    args.push('--no-sandbox')
+    if (config.linuxGpuAngle) {
+      args.push('--use-angle=gl')
+    }
+  }
+  args.push(...config.extraChromeArgs)
+  return args
+}
+
+/**
+ * 无头浏览器渲染池。
+ * 每个工作进程 = 一个独立浏览器实例（独立 WebGL 上下文），页面加载 webrenderer
+ * 后通过 WebSocket 接收 api:start-export 任务、回传 api:export-result。
+ */
+export class RenderPool implements ExportDispatcher {
+  private readonly logger: Logger<ILogObj>
+  private readonly config: HostConfig
+  private readonly hub: WsHub
+  private readonly workers = new Map<string, WorkerState>()
+  private readonly readyWaiters = new Map<string, Array<() => void>>()
+  private readonly bufferedTasks: ExportTask[] = []
+  private stopping = false
+
+  onExportResult: ((taskId: string, result: ExportResultPayload) => void) | null = null
+
+  constructor(logger: Logger<ILogObj>, config: HostConfig, hub: WsHub) {
+    this.logger = logger
+    this.config = config
+    this.hub = hub
+  }
+
+  async start(): Promise<void> {
+    const launchArgs = baseLaunchArgs(this.config)
+
+    for (let i = 0; i < this.config.workers; i++) {
+      const workerId = `w${i + 1}`
+      this.workers.set(workerId, this.createWorkerState(workerId))
+      // 串行启动，避免并发启动争抢
+      await this.launchWorker(this.workers.get(workerId)!, launchArgs)
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.stopping = true
+    for (const [, worker] of this.workers) {
+      await this.closeBrowser(worker)
+    }
+    this.hub.closeAll()
+    this.logger.info('[Pool] All render workers stopped')
+  }
+
+  stats(): Record<string, unknown> {
+    const all = Array.from(this.workers.values())
+    return {
+      configuredWorkers: this.config.workers,
+      readyWorkers: all.filter((w) => w.ready).length,
+      idleWorkers: all.filter((w) => w.ready && !w.busy).length,
+      busyTaskIds: all.filter((w) => w.busyTaskId).map((w) => w.busyTaskId),
+      webglRenderers: all.map((w) => ({ workerId: w.workerId, renderer: w.webglRenderer })),
+      exportsCompleted: all.reduce((sum, w) => sum + w.exportsCompleted, 0)
+    }
+  }
+
+  // ----- 生命周期 -----
+
+  private createWorkerState(workerId: string): WorkerState {
+    return {
+      workerId,
+      browser: null,
+      page: null,
+      ready: false,
+      busy: false,
+      busyTaskId: null,
+      exportsCompleted: 0,
+      webglRenderer: null,
+      launching: false
+    }
+  }
+
+  private async launchBrowser(launchArgs: string[]): Promise<{ browser: Browser; via: string }> {
+    const channels = this.config.browserExecutablePath
+      ? [null]
+      : [...this.config.browserChannels, null]
+
+    const errors: string[] = []
+    for (const channel of channels) {
+      try {
+        const browser = await chromium.launch({
+          headless: true,
+          channel: channel ?? undefined,
+          executablePath: this.config.browserExecutablePath ?? undefined,
+          args: launchArgs
+        })
+        return { browser, via: channel ?? 'bundled-chromium' }
+      } catch (err) {
+        errors.push(`${channel ?? 'bundled'}: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    throw new Error(`Failed to launch any browser. Attempts:\n${errors.join('\n')}`)
+  }
+
+  private async launchWorker(worker: WorkerState, launchArgs?: string[]): Promise<void> {
+    if (this.stopping || worker.launching) return
+    worker.launching = true
+    worker.ready = false
+    worker.webglRenderer = null
+
+    const args = launchArgs || baseLaunchArgs(this.config)
+
+    try {
+      const { browser, via } = await this.launchBrowser(args)
+      worker.browser = browser
+
+      browser.on('disconnected', () => this.handleBrowserDisconnected(worker))
+
+      await this.openWorkerPage(worker)
+      this.logger.info(
+        `[Pool] Worker ${worker.workerId} ready (browser: ${via}, recycle every ${
+          this.config.workerRecycleExports || '∞'
+        } exports)`
+      )
+    } catch (err) {
+      this.logger.error(`[Pool] Worker ${worker.workerId} launch failed`, err)
+      setTimeout(() => {
+        if (!this.stopping) {
+          void this.launchWorker(worker).catch(() => undefined)
+        }
+      }, RELAUNCH_DELAY_MS)
+    } finally {
+      worker.launching = false
+    }
+  }
+
+  private async openWorkerPage(worker: WorkerState): Promise<void> {
+    const page = await worker.browser!.newPage()
+    worker.page = page
+
+    const readyPromise = this.waitForReady(worker.workerId)
+
+    await page.goto(`http://127.0.0.1:${this.config.port}/?worker=${worker.workerId}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
+    })
+
+    await readyPromise
+    worker.ready = true
+
+    await this.probeWebGL(worker)
+  }
+
+  private waitForReady(workerId: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Worker ${workerId} not ready within ${WORKER_READY_TIMEOUT_MS}ms`))
+      }, WORKER_READY_TIMEOUT_MS)
+      const waiters = this.readyWaiters.get(workerId) || []
+      waiters.push(() => {
+        clearTimeout(timer)
+        resolve()
+      })
+      this.readyWaiters.set(workerId, waiters)
+    })
+  }
+
+  private async probeWebGL(worker: WorkerState): Promise<void> {
+    if (!worker.page) return
+    try {
+      // 探测代码以字符串形式注入执行（宿主 TS 环境无 DOM 类型）
+      const renderer = (await worker.page.evaluate(`(() => {
+        const canvas = document.createElement('canvas')
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+        if (!gl) return 'NO_WEBGL'
+        const ext = gl.getExtension('WEBGL_debug_renderer_info')
+        if (!ext) return String(gl.getParameter(gl.RENDERER))
+        return String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || 'UNKNOWN')
+      })()`)) as string
+      worker.webglRenderer = renderer
+      this.logger.info(`[Pool] Worker ${worker.workerId} WebGL renderer: ${renderer}`)
+      if (renderer === 'NO_WEBGL' || /swiftshader|software|llvmpipe/i.test(renderer)) {
+        this.logger.warn(
+          `[Pool] Worker ${worker.workerId} is NOT using hardware GPU acceleration (renderer: ${renderer})!`
+        )
+      }
+    } catch (err) {
+      this.logger.warn(`[Pool] Worker ${worker.workerId} WebGL probe failed`, err)
+    }
+  }
+
+  private handleBrowserDisconnected(worker: WorkerState): void {
+    if (this.stopping) return
+    this.logger.warn(`[Pool] Worker ${worker.workerId} browser disconnected, relaunching...`)
+    worker.browser = null
+    worker.page = null
+    worker.ready = false
+
+    if (worker.busyTaskId) {
+      const taskId = worker.busyTaskId
+      worker.busy = false
+      worker.busyTaskId = null
+      this.onExportResult?.(taskId, {
+        taskId,
+        success: false,
+        error: `Render worker ${worker.workerId} crashed during export`
+      })
+    }
+
+    void this.launchWorker(worker).catch((err) =>
+      this.logger.error(`[Pool] Worker ${worker.workerId} relaunch failed`, err)
+    )
+  }
+
+  private async closeBrowser(worker: WorkerState): Promise<void> {
+    const browser = worker.browser
+    worker.browser = null
+    worker.page = null
+    worker.ready = false
+    if (browser) {
+      try {
+        await browser.close()
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  // ----- 事件入口（main 接线到 WsHub）-----
+
+  handleWorkerReady(workerId: string): void {
+    this.logger.info(`[Pool] Worker ${workerId} bridge connected`)
+    const waiters = this.readyWaiters.get(workerId)
+    if (waiters) {
+      for (const waiter of waiters) waiter()
+      this.readyWaiters.delete(workerId)
+    }
+  }
+
+  handleWorkerMessage(workerId: string, message: WorkerMessage): void {
+    if (message.type === 'api:export-result') {
+      const result = message.args[0] as ExportResultPayload
+      const worker = this.workers.get(workerId)
+
+      if (worker && worker.busyTaskId === result.taskId) {
+        worker.busy = false
+        worker.busyTaskId = null
+        worker.exportsCompleted++
+
+        this.onExportResult?.(result.taskId, result)
+
+        // 页面回收：按导出次数重建，防止 Live2D/Cubism 内存累积
+        if (
+          this.config.workerRecycleExports > 0 &&
+          worker.exportsCompleted % this.config.workerRecycleExports === 0
+        ) {
+          this.logger.info(
+            `[Pool] Recycling worker ${worker.workerId} after ${worker.exportsCompleted} exports`
+          )
+          void this.closeBrowser(worker)
+            .then(() => this.launchWorker(worker))
+            .catch((err) =>
+              this.logger.error(`[Pool] Worker ${worker.workerId} recycle relaunch failed`, err)
+            )
+        }
+
+        this.flushBufferedTasks()
+      } else {
+        this.logger.warn(
+          `[Pool] Export-result for unknown/mismatched task: worker=${workerId}, taskId=${result?.taskId}`
+        )
+      }
+      return
+    }
+
+    if (message.type === 'electron:on-error') {
+      this.logger.error(`[Pool] Worker ${workerId} reported error`, message.args[0])
+    }
+  }
+
+  handleWorkerDisconnected(workerId: string): void {
+    const worker = this.workers.get(workerId)
+    if (!worker) return
+    worker.ready = false
+
+    // WS 断开但浏览器仍存活：重建页面；若正在导出则视为失败
+    if (worker.busyTaskId) {
+      const taskId = worker.busyTaskId
+      worker.busy = false
+      worker.busyTaskId = null
+      this.onExportResult?.(taskId, {
+        taskId,
+        success: false,
+        error: `Render worker ${worker.workerId} connection lost during export`
+      })
+    }
+
+    if (worker.browser && worker.browser.isConnected()) {
+      void this.openWorkerPage(worker)
+        .then(() => this.logger.info(`[Pool] Worker ${worker.workerId} page recovered`))
+        .catch((err) => {
+          this.logger.warn(`[Pool] Worker ${worker.workerId} page recovery failed, recycling`, err)
+          void this.closeBrowser(worker).then(() => this.launchWorker(worker))
+        })
+    }
+  }
+
+  // ----- ExportDispatcher -----
+
+  dispatch(task: ExportTask): void {
+    const worker = this.pickIdleWorker()
+    if (!worker) {
+      // 正常情况下 VideoApiServer 的并发上限保证有空闲 worker；此处仅兜底
+      this.bufferedTasks.push(task)
+      this.logger.warn(
+        `[Pool] No idle worker for task ${task.taskId}, buffered (buffered=${this.bufferedTasks.length})`
+      )
+      return
+    }
+
+    worker.busy = true
+    worker.busyTaskId = task.taskId
+
+    const payload = {
+      taskId: task.taskId,
+      story: task.story,
+      outputPath: task.outputPath,
+      videoConfig: task.videoConfig
+    }
+
+    const sent = this.hub.send(worker.workerId, { type: 'api:start-export', args: [payload] })
+    if (!sent) {
+      worker.busy = false
+      worker.busyTaskId = null
+      this.onExportResult?.(task.taskId, {
+        taskId: task.taskId,
+        success: false,
+        error: `Failed to send task to worker ${worker.workerId}`
+      })
+    }
+  }
+
+  cancel(taskId: string): void {
+    // 与原实现一致：取消只影响等待中的 HTTP 响应，渲染侧自然完成
+    this.logger.info(`[Pool] Cancel requested for task ${taskId}`)
+  }
+
+  private pickIdleWorker(): WorkerState | null {
+    let idle: WorkerState | null = null
+    let idleIndex = Number.MAX_SAFE_INTEGER
+    const ids = Array.from(this.workers.keys())
+
+    for (let i = 0; i < ids.length; i++) {
+      const worker = this.workers.get(ids[i])!
+      if (worker.ready && !worker.busy && i < idleIndex) {
+        idle = worker
+        idleIndex = i
+      }
+    }
+    return idle
+  }
+
+  private flushBufferedTasks(): void {
+    while (this.bufferedTasks.length > 0) {
+      const worker = this.pickIdleWorker()
+      if (!worker) return
+      const task = this.bufferedTasks.shift()!
+      this.dispatch(task)
+    }
+  }
+}

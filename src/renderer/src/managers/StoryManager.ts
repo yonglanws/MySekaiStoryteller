@@ -4,22 +4,33 @@ import { Live2DModelMap, TextureMap } from '../types/AssetMap'
 import AdvancedModel from '../model/AdvancedModel'
 import { Resource, Texture, Ticker } from 'pixi.js'
 import { Cubism2InternalModel } from 'pixi-live2d-display-advanced'
+import { builtinResourceUrl, externalStoryResourceUrl } from '../utils/ResourceUrl'
 
 export default class StoryManager {
   public readonly storyJsonPath: string
   public readonly storyFolder: string
   public readonly storyData: StoryData
+  public readonly isBuiltin: boolean
 
   constructor(story: SelectStoryResponse) {
     this.storyJsonPath = story.path!
     this.storyFolder = window.api.getFolder(this.storyJsonPath)
     this.storyData = story.data!
+    this.isBuiltin =
+      this.storyJsonPath.includes('builtin') || this.storyJsonPath.includes('api-story')
+  }
+
+  private getResourceUrl(subPath: string): string {
+    if (this.isBuiltin) {
+      return builtinResourceUrl(subPath)
+    }
+    return externalStoryResourceUrl(this.storyFolder, subPath)
   }
 
   public async preloadModels(): Promise<Live2DModelMap[]> {
     const result: Live2DModelMap[] = []
     for (const model_data of this.storyData.models) {
-      const fullPath = `mss://load-file/${this.storyFolder}/models/${model_data.model}`
+      const fullPath = this.getResourceUrl(`models/${model_data.model}`)
 
       let model: AdvancedModel
 
@@ -60,7 +71,7 @@ export default class StoryManager {
     const result: TextureMap[] = []
 
     for (const image of this.storyData.images) {
-      const imageUrl = `mss://load-file/${this.storyFolder}/images/${image.image}`
+      const imageUrl = this.getResourceUrl(`images/${image.image}`)
 
       let texture: Texture<Resource>
 
@@ -84,7 +95,7 @@ export default class StoryManager {
   }
 
   public geVoiceUrlByName(name: string): string {
-    return `mss://load-file/${this.storyFolder}/voices/${name}`
+    return this.getResourceUrl(`voices/${name}`)
   }
 
   get snippets(): SnippetData[] {

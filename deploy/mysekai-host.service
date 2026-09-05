@@ -1,0 +1,22 @@
+[Unit]
+Description=MySekaiStoryteller Pure-API Render Host
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+Group=YOUR_GROUP
+WorkingDirectory=/opt/MySekaiStoryteller
+# 编码器：auto 自动探测 nvenc/amf/qsv（NVIDIA 服务器推荐 auto 或 nvenc）
+Environment=MSS_FFMPEG_ENCODER=auto
+# 渲染工作进程数（每 worker 约 300-500MB 内存）
+Environment=MSS_WORKERS=2
+ExecStart=/usr/bin/node out-host/host/main.js
+Restart=on-failure
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

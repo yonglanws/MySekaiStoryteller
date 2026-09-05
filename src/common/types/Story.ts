@@ -105,7 +105,8 @@ const SnippetSchema = z.discriminatedUnion('type', [
       speaker: z.string(),
       content: z.string(),
       modelId: z.number().default(-1),
-      voice: z.string().default('')
+      voice: z.string().default(''),
+      ttsText: z.string().default('')
     })
   }),
   z.object({

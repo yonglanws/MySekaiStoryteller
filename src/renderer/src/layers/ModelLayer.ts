@@ -11,6 +11,8 @@ export default class ModelLayer extends BaseLayer {
   }
 
   public addModelToLayer(model: AdvancedModel): void {
+    if (this.layerContainer.children.includes(model)) return
+
     const scale = this.app.screen.height / model.internalModel.originalHeight
     model.scale.set(
       scale *

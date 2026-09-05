@@ -21,15 +21,19 @@ export default class MoveSnippet extends BaseSnippet {
 
     let move_task: Promise<void> | null = null
 
-    if ((from.x === to.x && to.y === to.y) || this.data.data.moveSpeed === MoveSpeed.Immediate) {
+    if (from.x === to.x && from.y === to.y) {
       model.setPositionRel(this.app.stage_size, to)
     } else {
-      move_task = model.move(
-        this.app.stage_size,
-        from,
-        to,
-        StageUtils.move_speed_to_num(this.data.data.moveSpeed)
-      )
+      if (this.data.data.moveSpeed === MoveSpeed.Immediate) {
+        move_task = Promise.resolve(model.setPositionRel(this.app.stage_size, to))
+      } else {
+        move_task = model.move(
+          this.app.stage_size,
+          from,
+          to,
+          StageUtils.move_speed_to_num(this.data.data.moveSpeed)
+        )
+      }
     }
 
     await move_task

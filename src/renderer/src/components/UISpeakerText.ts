@@ -12,7 +12,10 @@ export default class UISpeakerText extends Text {
       fontSize: screen_height / 25,
       fontWeight: '600',
       stroke: '#4A4968D9',
-      strokeThickness: screen_height / 120
+      strokeThickness: screen_height / 120,
+      wordWrap: true,
+      wordWrapWidth: screen_width * 0.7,
+      breakWords: true
     })
     super('', style)
 
@@ -26,17 +29,22 @@ export default class UISpeakerText extends Text {
 
   public async show(time: number): Promise<void> {
     this.visible = true
+    const alphaFilter: AlphaFilter = this.filters![0] as AlphaFilter
+    alphaFilter.alpha = 0
+
     await AnimationManager.linear((progress) => {
-      const alpha_filter: AlphaFilter = this.filters![0] as AlphaFilter
-      alpha_filter.alpha = progress
+      alphaFilter.alpha = progress
     }, time)
   }
 
   public async hide(time: number): Promise<void> {
+    const alphaFilter: AlphaFilter = this.filters![0] as AlphaFilter
+    alphaFilter.alpha = 1
+
     await AnimationManager.linear((progress) => {
-      const alpha_filter: AlphaFilter = this.filters![0] as AlphaFilter
-      alpha_filter.alpha = 1 - progress
+      alphaFilter.alpha = 1 - progress
     }, time)
+
     this.visible = false
   }
 }

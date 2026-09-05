@@ -262,3 +262,9 @@ tests/
 # Electron build files
 build/
 /.idea/jsonSchemas.xml
+
+# pure-API host build & runtime artifacts
+out-host/
+user-configs-runtime/
+apifile/
+logs/

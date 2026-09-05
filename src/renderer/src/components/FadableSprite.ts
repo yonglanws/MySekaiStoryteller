@@ -12,17 +12,22 @@ export default class FadableSprite extends Sprite {
 
   public async show(time: number): Promise<void> {
     this.visible = true
+    const alphaFilter: AlphaFilter = this.filters![0] as AlphaFilter
+    alphaFilter.alpha = 0
+
     await AnimationManager.linear((progress) => {
-      const alpha_filter: AlphaFilter = this.filters![0] as AlphaFilter
-      alpha_filter.alpha = progress
+      alphaFilter.alpha = progress
     }, time)
   }
 
   public async hide(time: number): Promise<void> {
+    const alphaFilter: AlphaFilter = this.filters![0] as AlphaFilter
+    alphaFilter.alpha = 1
+
     await AnimationManager.linear((progress) => {
-      const alpha_filter: AlphaFilter = this.filters![0] as AlphaFilter
-      alpha_filter.alpha = 1 - progress
+      alphaFilter.alpha = 1 - progress
     }, time)
+
     this.visible = false
   }
 }

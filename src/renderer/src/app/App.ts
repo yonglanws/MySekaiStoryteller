@@ -1,7 +1,8 @@
-﻿import '@pixi/unsafe-eval'
+import '@pixi/unsafe-eval'
 import getSubLogger from '../utils/Logger'
 import { ILogObj, Logger } from 'tslog'
 import { SelectStoryResponse } from '../../../common/types/IpcResponse'
+import { StoryData } from '../../../common/types/Story'
 import StoryManager from '../managers/StoryManager'
 import { Live2DModelMap, TextureMap } from '../types/AssetMap'
 import BackgroundLayer from '../layers/BackgroundLayer'
@@ -13,56 +14,40 @@ import FontFaceObserver from 'fontfaceobserver'
 import { Application, Texture, Ticker } from 'pixi.js'
 import SpecialEffectLayer from '../layers/SpecialEffectLayer'
 import { configureCubism4 } from 'pixi-live2d-display-advanced'
+import VideoExportManager, {
+  VideoExportOptions,
+  ExportProgress
+} from '../managers/VideoExportManager'
+import AnimationManager from '../managers/AnimationManager'
+import { TTSManager } from '../managers/TTSManager'
 
+/**
+ * 纯 API 渲染工作进程：
+ * 页面由 Node 宿主（无头浏览器）加载，仅提供 api:start-export → runApiExport 的导出能力，
+ * 不再包含桌面 UI、故事选择与预览播放逻辑。
+ */
 export class App {
   public readonly logger: Logger<ILogObj> = getSubLogger('App')
   public pixiApplication!: Application
   public storyManager!: StoryManager
   public snippetStrategyManager!: SnippetStrategyManager
-  private applicationWrapper!: HTMLDivElement
+  private applicationWrapper!: HTMLDivElement | null
+  public videoExportManager!: VideoExportManager
 
   public layerBackground!: BackgroundLayer
   public layerModel!: ModelLayer
   public layerUI!: UILayer
   public layerSpecialEffect!: SpecialEffectLayer
+  public ttsManager: TTSManager = new TTSManager()
 
   private models: Live2DModelMap[] = []
   private textures: TextureMap[] = []
 
-  private async selectStoryFile(): Promise<SelectStoryResponse> {
-    const selectResult: SelectStoryResponse = await window.electron.ipcRenderer.invoke(
-      'electron:select-story-file-until-selected'
-    )
+  public exporting: boolean = false
+  public lastSnippetActualDurationMs: number = 0
+  private apiExportInProgress: boolean = false
 
-    if (!selectResult.success) {
-      if (selectResult.zodIssueMessage) {
-        throw new Error(selectResult.zodIssueMessage)
-      } else {
-        throw selectResult.error
-      }
-    }
-
-    return selectResult
-  }
-
-  private async selectStoryFileUntilSuccess(): Promise<SelectStoryResponse> {
-    let selectResult: SelectStoryResponse
-
-    let selectFileValid = false
-    while (!selectFileValid) {
-      try {
-        selectResult = await this.selectStoryFile()
-        selectFileValid = true
-      } catch (error) {
-        this.logger.error(error)
-        throw error
-      }
-    }
-
-    return selectResult!
-  }
-
-  private async initializeManagers(story: SelectStoryResponse): Promise<void> {
+  public async initializeManagers(story: SelectStoryResponse): Promise<void> {
     this.storyManager = new StoryManager(story)
     this.logger.info(`StoryManager initialized, root path: ${this.storyManager.storyFolder}`)
 
@@ -70,34 +55,84 @@ export class App {
     this.logger.info('SnippetStrategyManager initialized')
   }
 
-  private initializeRenderer(scale: number): void {
-    this.applicationWrapper = document.getElementById('app')! as HTMLDivElement
+  public initializeRenderer(scale: number, forExport = false): void {
+    this.applicationWrapper = document.getElementById('app') as HTMLDivElement | null
 
-    this.pixiApplication = new Application({
-      backgroundColor: 0xffffff,
-      resizeTo: this.applicationWrapper,
-      autoDensity: true,
-      antialias: true,
-      resolution: scale
-    })
-    Ticker.shared.maxFPS = 60
+    if (!this.applicationWrapper) {
+      const wrapper = document.createElement('div')
+      wrapper.id = 'app'
+      wrapper.style.width = '1280px'
+      wrapper.style.height = '720px'
+      if (document.body) {
+        document.body.appendChild(wrapper)
+      } else {
+        document.addEventListener('DOMContentLoaded', () => {
+          document.body.appendChild(wrapper)
+        })
+      }
+      this.applicationWrapper = wrapper
+    }
 
-    this.applicationWrapper.appendChild(this.pixiApplication.view as HTMLCanvasElement)
+    if (this.pixiApplication) {
+      try {
+        Ticker.shared.stop()
+        this.pixiApplication.destroy(true, { children: true, texture: true })
+      } catch (e) {
+        this.logger.warn('Failed to destroy previous pixiApplication', e)
+      }
+    }
+
+    const resolution = scale
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- PixiJS v7 的 ApplicationOptions 未导出 resizeTo 宽泛类型
+      const appOptions: any = {
+        backgroundColor: 0xffffff,
+        autoDensity: true,
+        antialias: true,
+        resolution,
+        preserveDrawingBuffer: forExport
+      }
+
+      if (forExport) {
+        appOptions.width = 1280
+        appOptions.height = 720
+      } else {
+        appOptions.resizeTo = this.applicationWrapper
+      }
+
+      this.pixiApplication = new Application(appOptions)
+      this.logger.info(`PixiJS renderer: ${this.pixiApplication.renderer.type}`)
+    } catch (e) {
+      this.logger.error('PixiJS Application creation failed:', e)
+      throw e
+    }
+
+    Ticker.shared.maxFPS = forExport ? 120 : 60
+    Ticker.shared.start()
+
+    if (this.applicationWrapper) {
+      this.applicationWrapper.appendChild(this.pixiApplication.view as HTMLCanvasElement)
+    } else {
+      this.logger.warn('applicationWrapper is null, skipping canvas append')
+    }
 
     this.pixiApplication.stage.sortableChildren = true
 
     configureCubism4({
-      memorySizeMB: 128
+      memorySizeMB: forExport ? 256 : 128
     })
 
-    this.logger.info('Render initialized')
+    this.logger.info(
+      `Render initialized: resolution=${resolution}, forExport=${forExport}, canvas=${(this.pixiApplication.view as HTMLCanvasElement).width}x${(this.pixiApplication.view as HTMLCanvasElement).height}`
+    )
   }
 
   get stage_size(): [number, number] {
     return [this.pixiApplication.screen.width, this.pixiApplication.screen.height]
   }
 
-  private async preloadStoryAssets(): Promise<void> {
+  public async preloadStoryAssets(): Promise<void> {
     this.models = await this.storyManager.preloadModels()
     this.logger.info(`Loaded ${this.models.length} models`)
 
@@ -110,78 +145,259 @@ export class App {
     this.logger.info('Preloaded story assets')
   }
 
-  private initializeLayers(): void {
+  public initializeLayers(): void {
     this.layerBackground = new BackgroundLayer(this.pixiApplication)
     this.layerModel = new ModelLayer(this.pixiApplication)
     this.layerUI = new UILayer(this.pixiApplication)
     this.layerSpecialEffect = new SpecialEffectLayer(this.pixiApplication)
   }
 
-  private async readUntilFinish(): Promise<void> {
-    const snippets = this.storyManager.snippets
-
-    for (const snippet of snippets) {
-      this.logger.info(`Snippet: ${snippet.type}`)
-
-      await this.snippetStrategyManager.handleSnippet(snippet)
-    }
+  public getTextureById(id: number): Texture {
+    const entry = this.textures.find((image) => image.id === id)
+    if (!entry) throw new Error(`Texture with id ${id} not found`)
+    return entry.image
   }
 
-  public getTextureById(id: number): Texture {
-    const data = this.textures
-
-    return data.find((image) => image.id === id)!.image
+  public get isExporting(): boolean {
+    return this.exporting
   }
 
   public getModelById(id: number): AdvancedModel {
-    const data = this.models
-
-    return data.find((model) => model.id === id)!.model
+    const entry = this.models.find((model) => model.id === id)
+    if (!entry) throw new Error(`Model with id ${id} not found`)
+    return entry.model
   }
 
   public getVoiceByName(name: string): string {
     return this.storyManager.geVoiceUrlByName(name)
   }
 
-  private async runSnippets(
-    story: SelectStoryResponse,
-    options: {
-      scale: number
+  private setupApiExportListener(): void {
+    window.electron.ipcRenderer.on(
+      'api:start-export',
+      async (
+        _event,
+        payload: {
+          taskId: string
+          story: StoryData
+          outputPath: string
+          videoConfig: {
+            width: number
+            height: number
+            renderScale: number
+            fps: number
+            codec: string
+            crf: number
+            audioBitrate: string
+          }
+        }
+      ) => {
+        if (this.apiExportInProgress) {
+          this.logger.warn(`API export already in progress, rejecting task: ${payload.taskId}`)
+          window.electron.ipcRenderer.send('api:export-result', {
+            taskId: payload.taskId,
+            success: false,
+            error: 'Another API export is already in progress'
+          })
+          return
+        }
+
+        this.apiExportInProgress = true
+        this.logger.info(`API export started: taskId=${payload.taskId}`)
+
+        try {
+          const result = await this.runApiExport(
+            payload.story,
+            payload.outputPath,
+            payload.videoConfig
+          )
+          this.logger.info(
+            `API export result: success=${result.success}, videoPath=${result.videoPath}`
+          )
+          window.electron.ipcRenderer.send('api:export-result', {
+            taskId: payload.taskId,
+            success: result.success,
+            videoPath: result.videoPath,
+            duration: result.duration,
+            frameCount: result.frameCount,
+            error: result.error
+          })
+          this.logger.info(`api:export-result sent for taskId=${payload.taskId}`)
+        } catch (error) {
+          this.logger.error('API export failed', error)
+          window.electron.ipcRenderer.send('api:export-result', {
+            taskId: payload.taskId,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          })
+        } finally {
+          this.apiExportInProgress = false
+        }
+      }
+    )
+
+    this.logger.info('API export listener registered')
+  }
+
+  public async runApiExport(
+    storyData: StoryData,
+    outputPath: string,
+    videoConfig: {
+      width: number
+      height: number
+      renderScale: number
+      fps: number
+      codec: string
+      crf: number
+      audioBitrate: string
     }
-  ): Promise<void> {
-    await this.initializeManagers(story)
-    this.initializeRenderer(options.scale)
+  ): Promise<{
+    success: boolean
+    videoPath?: string
+    duration?: number
+    frameCount?: number
+    error?: string
+  }> {
+    const startTime = performance.now()
+    this.logger.info(
+      `API export: ${videoConfig.width}x${videoConfig.height}, ${videoConfig.fps}fps, scale=${videoConfig.renderScale}`
+    )
+
+    await this.loadAndApplyConfigForApiExport()
+
+    AnimationManager.exportSpeedMultiplier = 1
+
+    const storyResponse: SelectStoryResponse = {
+      success: true,
+      data: storyData
+    }
+
+    const saveResult = await window.electron.ipcRenderer.invoke('electron:api-save-story-temp', {
+      storyData
+    })
+
+    if (saveResult.success && saveResult.path) {
+      storyResponse.path = saveResult.path
+    }
+
+    await this.initializeManagers(storyResponse)
+    this.initializeRenderer(videoConfig.renderScale, true)
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+
     await this.preloadStoryAssets()
     this.initializeLayers()
-    await this.readUntilFinish()
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+
+    this.videoExportManager = new VideoExportManager(this)
+
+    const exportOptions: VideoExportOptions = {
+      fps: videoConfig.fps,
+      width: videoConfig.width,
+      height: videoConfig.height,
+      quality: 'high',
+      format: 'mp4',
+      codec: 'h264',
+      crf: videoConfig.crf,
+      useGpu: true,
+      gpuRenderer: 'auto',
+      exportMode: 'stream',
+      jpegQuality: 0.85,
+      batchSize: 30,
+      apiMode: true,
+      apiOutputPath: outputPath,
+      apiCrf: videoConfig.crf,
+      apiAudioBitrate: videoConfig.audioBitrate
+    }
+
+    try {
+      const result = await this.videoExportManager.exportVideo(
+        exportOptions,
+        (progress: ExportProgress) => {
+          this.logger.info(
+            `API Export progress: ${progress.stage} - ${progress.current}/${progress.total} - ${progress.message}`
+          )
+        }
+      )
+
+      this.logger.info('API video rendering completed, starting compression...')
+
+      return {
+        success: true,
+        videoPath: outputPath,
+        duration: (performance.now() - startTime) / 1000,
+        frameCount: result.frameCount
+      }
+    } catch (error) {
+      this.logger.error('API export failed during rendering', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    } finally {
+      this.videoExportManager.destroy()
+      AnimationManager.setExportMode(false)
+      AnimationManager.exportSpeedMultiplier = 1
+      this.exporting = false
+      this.lastSnippetActualDurationMs = 0
+      this.ttsManager?.clearAudioTracks()
+      Ticker.shared.stop()
+      this.logger.info('Ticker stopped after API export completed to reduce GPU idle usage')
+    }
+  }
+
+  private async loadAndApplyConfigForApiExport(): Promise<void> {
+    try {
+      const ttsConfigStr = await window.electron.ipcRenderer.invoke(
+        'electron:load-config',
+        'mss-tts-config'
+      )
+      if (ttsConfigStr) {
+        const ttsConfig = JSON.parse(ttsConfigStr)
+        this.ttsManager.updateConfig({
+          enabled: ttsConfig.enabled ?? true,
+          apiBaseUrl: ttsConfig.apiBaseUrl ?? 'http://127.0.0.1:9880',
+          defaultRefAudioPath: ttsConfig.refAudio ?? ttsConfig.defaultRefAudioPath ?? '',
+          defaultPromptText: ttsConfig.promptText ?? ttsConfig.defaultPromptText ?? '',
+          promptLang: ttsConfig.promptLang ?? 'ja',
+          speedFactor: ttsConfig.speedFactor ?? 1.0,
+          textLang: ttsConfig.textLang ?? 'ja',
+          gptWeightsPath: ttsConfig.gptWeights ?? ttsConfig.gptWeightsPath ?? '',
+          sovitsWeightsPath: ttsConfig.sovitsWeights ?? ttsConfig.sovitsWeightsPath ?? ''
+        })
+        if (Array.isArray(ttsConfig.characters)) {
+          for (const char of ttsConfig.characters) {
+            if (char.characterName && char.refAudio) {
+              this.ttsManager.setCharacterVoice(char.characterName, {
+                characterName: char.characterName,
+                refAudioPath: char.refAudio,
+                promptText: char.promptText || ttsConfig.promptText || '',
+                promptLang: char.promptLang || ttsConfig.promptLang || 'ja',
+                gptWeightsPath: char.gptWeights || char.gptWeightsPath || undefined,
+                sovitsWeightsPath: char.sovitsWeights || char.sovitsWeightsPath || undefined
+              })
+            }
+          }
+        }
+        this.ttsManager.updateBGMConfig({
+          enabled: ttsConfig.bgmEnabled ?? true,
+          path: ttsConfig.bgmPath ?? 'resources/builtin/voices/bg1.mp3',
+          volume: ttsConfig.bgmVolume ?? 0.2
+        })
+        this.logger.info('API export: TTS config loaded from storage')
+      }
+
+      this.ttsManager.updateTranslationConfig({
+        enabled: false
+      })
+      this.logger.info('API export: Translation disabled (handled by plugin)')
+    } catch (error) {
+      this.logger.warn('API export: Failed to load saved config, using defaults', error)
+    }
   }
 
   public async run(): Promise<void> {
-    const selectFileTipsElement = document.getElementById('select-file-tips')! as HTMLHeadingElement
-    const story: SelectStoryResponse = await this.selectStoryFileUntilSuccess()
-    selectFileTipsElement.remove()
-
-    const app_element = document.getElementById('app')! as HTMLDivElement
-    const config_element = document.getElementById('config')! as HTMLDivElement
-    const apply_btn = document.getElementById('apply')! as HTMLButtonElement
-    const resolutionSelect = document.getElementById('resolution')! as HTMLSelectElement
-    const renderScaleSelect = document.getElementById('renderScale')! as HTMLSelectElement
-
-    apply_btn.addEventListener('click', async () => {
-      const resolutionValue = resolutionSelect.value
-      const renderScaleValue = parseFloat(renderScaleSelect.value)
-
-      const width = resolutionValue.split('x')[0]
-      const height = resolutionValue.split('x')[1]
-      window.electron.ipcRenderer.send('electron:resize', parseInt(width), parseInt(height))
-      app_element.hidden = false
-
-      config_element.remove()
-      await this.runSnippets(story, {
-        scale: renderScaleValue
-      })
-    })
-    config_element.hidden = false
+    this.setupApiExportListener()
+    this.logger.info('Render worker ready (pure API mode)')
   }
 }
 

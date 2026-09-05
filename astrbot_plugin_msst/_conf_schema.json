@@ -1,0 +1,47 @@
+{
+  "llm_provider_id": {
+    "description": "用于生成剧本的 LLM 提供商",
+    "type": "string",
+    "hint": "选择 Astrbot 中已配置的对话模型提供商。留空则使用当前默认的提供商。",
+    "default": "",
+    "_special": "select_provider",
+    "obvious_hint": true
+  },
+  "mss_api_url": {
+    "description": "MySekaiStoryteller API 地址",
+    "type": "string",
+    "hint": "视频导出 API 服务器地址。同设备填 http://127.0.0.1:9881，跨设备填 http://<目标设备IP>:9881",
+    "default": "http://127.0.0.1:9881",
+    "obvious_hint": true
+  },
+  "export_timeout": {
+    "description": "视频导出超时时间（秒）",
+    "type": "int",
+    "hint": "视频导出的最大等待时间，到达超时时间将自动取消导出。",
+    "default": 600
+  },
+  "max_concurrent_exports": {
+    "description": "最大并发导出数",
+    "type": "int",
+    "hint": "同时进行的视频导出任务数上限。增大此值会提高并发能力但可能增加服务器负载。",
+    "default": 1
+  },
+  "temp_dir": {
+    "description": "临时文件存储目录",
+    "type": "string",
+    "hint": "生成的视频、剧本等临时文件存储位置。留空使用插件数据目录。",
+    "default": ""
+  },
+  "callback_api_base": {
+    "description": "AstrBot 文件服务的外部可访问地址",
+    "type": "string",
+    "hint": "用于视频发送的回调地址，格式如 http://<外部IP>:<端口>。Docker 部署时填写宿主机IP和映射端口，如 http://192.168.31.54:6185。留空则自动检测。",
+    "default": ""
+  },
+  "test_mode": {
+    "description": "测试模式",
+    "type": "bool",
+    "hint": "启用后，「视频对话」和「剧本生成」功能将提示维护中，仅「测试视频对话」和「测试剧本生成」可正常使用。",
+    "default": false
+  }
+}
