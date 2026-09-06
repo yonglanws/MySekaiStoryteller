@@ -201,17 +201,6 @@ resources/       内置 Live2D 模型 / 背景 / 语音 / 示例故事
 astrbot_plugin_msst/  AstrBot 机器人插件
 ```
 
-## 系统要求
-
-| 组件            | 最低要求                   | 推荐配置                        |
-| --------------- | ------------------------ | ------------------------------- |
-| **操作系统**      | Windows 10 / Linux    | Linux 服务器（无桌面环境）          |
-| **CPU / 内存**   | 双核 2.0 GHz / 4 GB     | 四核 2.5 GHz+ / 8 GB+            |
-| **GPU**         | 支持 WebGL             | NVIDIA（NVENC）/ Intel（QSV）      |
-| **Node.js**     | 20.x                  | 22 LTS                         |
-| **浏览器**        | Edge / Chrome / Chromium | 与系统匹配的最新稳定版               |
-| **ffmpeg**      | 4.x（含 libx264）      | 6.x+（含 nvenc 等硬件编码器）        |
-
 ## 故障排除
 
 **Q: health 里 WebGL renderer 显示 SwiftShader / llvmpipe**
