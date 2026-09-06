@@ -5,7 +5,6 @@
  <h3 style="margin-top: 0; text-align: center;">My Sekai Storyteller</h3>
  <p style="text-align: center;">无头纯 API 的 Project SEKAI 风格 Live2D 视频渲染框架</p>
  <div style="display: flex; justify-content: center;">
-  <img src="https://img.shields.io/badge/项目状态-早期开发-red?style=for-the-badge" alt="Early Development" style="margin-top: 0; margin-right: 5px;"/>
   <img src="documents/assets/live2d-badge.svg" alt="Live2D Badge" style="margin-top: 0; margin-right: 5px;"/>
   <img src="https://img.shields.io/badge/typescript-20B2AA?logoColor=ffffff&style=for-the-badge&logo=typescript" alt="TypeScript" style="margin-top: 0; margin-right: 5px;" />
   <img src="https://img.shields.io/badge/node-20B2AA?style=for-the-badge&logoColor=white&logo=nodedotjs" alt="Node.js" style="margin-top: 0;" />
@@ -48,14 +47,6 @@
 | 导出并发       | 单窗口串行                   | N 个 worker 真并行（独立 WebGL 上下文）   |
 | 视频编码       | 固定 libx264（CPU）         | 自动探测 NVENC/AMF/QSV，失败回退 CPU    |
 | 进程隔离       | 无                       | 单任务崩溃不影响服务，页面按次数自动回收           |
-
-## 当前状态与路线图
-
-| 状态 | 事项 |
-| --- | --- |
-| ✅ 已验证 | Windows + Intel 核显：E2E 导出（h264 720p + AAC 音轨/BGM 混音）、双 worker 并行导出、编码器自动回退（nvenc/qsv→libx264）、无 TTS 环境容错 |
-| 🔶 待验证 | Linux 无桌面服务器部署、NVIDIA 无头 WebGL 渲染、NVENC 硬件编码（验证步骤见[部署文档](docs/host-deployment.md)） |
-| 📋 规划中 | API 鉴权、内容安全过滤、导出进度查询接口、监控指标 |
 
 ## 快速开始
 
