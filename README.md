@@ -2,29 +2,39 @@
 
 <div align="center" style="text-align: center; margin-top: 10px;">
  <img src="documents/assets/logo.png" style="align-self: center; width: 150px; margin-bottom: 0;" alt="Logo" />
- <h3 style="margin-top: 0; text-align: center;">My Sekai Storyteller</h3>
+ <h3 style="margin-top: 0; text-align: center;">MySekaiStoryteller-API</h3>
  <p style="text-align: center;">无头纯 API 的 Project SEKAI 风格 Live2D 视频渲染框架</p>
  <div style="display: flex; justify-content: center;">
   <img src="documents/assets/live2d-badge.svg" alt="Live2D Badge" style="margin-top: 0; margin-right: 5px;"/>
   <img src="https://img.shields.io/badge/typescript-20B2AA?logoColor=ffffff&style=for-the-badge&logo=typescript" alt="TypeScript" style="margin-top: 0; margin-right: 5px;" />
-  <img src="https://img.shields.io/badge/node-20B2AA?style=for-the-badge&logoColor=white&logo=nodedotjs" alt="Node.js" style="margin-top: 0;" />
+  <img src="https://img.shields.io/badge/node-20B2AA?style=for-the-badge&logoColor=white&logo=nodedotjs" alt="Node.js" style="margin-top: 0; margin-right: 5px;" />
   <img src="https://img.shields.io/badge/playwright-20B2AA?style=for-the-badge&logoColor=white&logo=playwright" alt="Playwright" style="margin-top: 0; margin-right: 5px;" />
-  <img src="https://img.shields.io/badge/ffmpeg-20B2AA?style=for-the-badge&logoColor=white&logo=ffmpeg" alt="FFmpeg" style="margin-top: 0;" />
+  <img src="https://img.shields.io/badge/ffmpeg-20B2AA?style=for-the-badge&logoColor=white&logo=ffmpeg" alt="FFmpeg" style="margin-top: 0; margin-right: 5px;" />
+  <img src="https://img.shields.io/badge/license-GPL--3.0-20B2AA?style=for-the-badge" alt="GPL 3.0" style="margin-top: 0;" />
  </div>
+ <p>
+  <a href="#项目简介">项目简介</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#astrbot-插件">AstrBot 插件</a> ·
+  <a href="#api-接口">API 接口</a> ·
+  <a href="#故事文件格式">故事文件格式</a> ·
+  <a href="#资源导入指南">资源导入</a> ·
+  <a href="#tts--bgm-配置">TTS / BGM</a> ·
+  <a href="#项目结构">项目结构</a> ·
+  <a href="#故障排除">故障排除</a>
+ </p>
 </div>
 
 > [!IMPORTANT]
 > 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) **二次开发**，
-> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**（`MySekaiStoryteller-API`）。
+> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**。
 > 如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
 > [Untitled-Story](https://github.com/Untitled-Story) 组织。
-
 
 > [!CAUTION]
 > **本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
 > **不保证大部分功能的可用性与稳定性**。当前仅核心导出链路在有限环境下验证通过，Linux + NVIDIA 生产环境尚待实测。
 > 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller-API/issues)。
-
 
 ## 项目简介
 
@@ -32,13 +42,15 @@
 通过 HTTP API 对外提供服务。典型用法：部署在一台带 GPU 的服务器上，配合
 [AstrBot 插件](astrbot_plugin_msst/) 实现 QQ/Telegram 机器人的 AI 剧本生成与视频自动发送。
 
-- **渲染引擎**: PixiJS + Live2D 跑在无头 Chrome 里（Playwright 渲染池，每个页面独立 WebGL 上下文）
-- **视频编码**: ffmpeg 自动探测 NVENC / AMF / QSV 硬件编码，失败自动回退 CPU
-- **音频**: 内置 BGM + GPT-SoVITS 语音合成（无 TTS 时自动跳过配音，导出不受影响）
-- **队列管理**: 任务排队、并发导出、IP 限流、过期文件自动清理
-- **统一配置**: 单个 `config.yaml`，全字段中文注释，环境变量可覆盖
+| 特性     | 说明                                                                       |
+| -------- | -------------------------------------------------------------------------- |
+| 渲染引擎 | PixiJS + Live2D 跑在无头 Chrome 里（Playwright 渲染池，每页独立 WebGL 上下文） |
+| 视频编码 | ffmpeg 自动探测 NVENC / AMF / QSV 硬件编码，失败自动回退 CPU                 |
+| 音频     | 内置 BGM + GPT-SoVITS 语音合成（无 TTS 时自动跳过配音，导出不受影响）        |
+| 队列管理 | 任务排队、并发导出、IP 限流、过期文件自动清理                                |
+| 统一配置 | 单个 `config.yaml`，全字段中文注释，`MSS_*` 环境变量可覆盖                   |
 
-## 快速开始（5 分钟）
+## 快速开始
 
 ```bash
 git clone https://github.com/yonglanws/MySekaiStoryteller-API.git
@@ -53,7 +65,7 @@ npx playwright install chromium
 # 3. 生成配置文件（每项都有中文注释，按需修改）
 cp config.example.yaml config.yaml
 
-# 4. 准备渲染资源（模型/背景/剧本，仓库不附带，见下方「资源准备」）
+# 4. 准备渲染资源（仓库不附带，见下文「资源准备」）
 
 # 5. 构建（类型检查 + webrenderer + 宿主）
 npm run build
@@ -62,14 +74,14 @@ npm run build
 npm start
 ```
 
-启动后验证：
+**启动验证**
 
 ```bash
 curl http://127.0.0.1:9881/api/v1/health
 # renderPool.webglRenderers 应显示真实 GPU（如 NVIDIA / Intel），而非 SwiftShader
 ```
 
-跑一个真实导出验证全链路（需先完成资源准备）：
+**全链路验证**（需先完成资源准备）
 
 ```bash
 npm run e2e                        # 示例故事导出 + 产物断言（编码/分辨率/时长/音轨）
@@ -78,19 +90,28 @@ node scripts/test-parallel.mjs 2   # 并发导出验证
 
 ### 资源准备（必需）
 
-**本仓库不附带渲染资源**（Live2D 模型、背景图、语音、BGM、示例剧本）——为控制仓库体积
-并遵循素材版权要求，仓库只保留目录结构，资源需自行放入（完整说明见
+**本仓库不附带渲染资源**（Live2D 模型、背景图、语音、BGM、示例剧本）——为控制仓库体积并
+遵循素材版权要求，仓库只保留目录结构，资源需自行放入（详见
 [resources/README.md](resources/README.md)）：
+
+```
+resources/
+├─ models/       Live2D 模型包（<角色>/<变体>/，含 model3.json；根下 models.yaml 为登记表）
+├─ images/       背景图 / 卡面
+├─ voices/       故事语音（.wav，故事 JSON 按文件名引用）
+├─ audio/bgm/    BGM
+└─ stories/      *.sekai-story.json 剧本
+```
 
 ```bash
 # 方式一：从上游仓库整体拷贝 resources/（模型/背景/剧本/BGM 齐全，按需取舍）
 git clone --depth 1 https://github.com/Untitled-Story/MySekaiStoryteller /tmp/upstream
 cp -r /tmp/upstream/resources/. resources/
 
-# 方式二：使用你已有的资源包，按 resources/README.md 的目录结构放入
+# 方式二：使用你已有的资源包，按上面的目录结构放入
 ```
 
-资源根不强制叫 `resources/`，可在 `config.yaml` 的 `paths.resources` 或环境变量
+资源根不强制叫 `resources/`：可在 `config.yaml` 的 `paths.resources` 或环境变量
 `MSS_RESOURCE_DIR` 指向任意目录。
 
 ### Linux 服务器部署（NVIDIA 硬件加速）
@@ -100,7 +121,7 @@ systemd 单元、NVENC 验证三步与无 GPU 时的参数调优。
 
 ## AstrBot 插件
 
-本插件提供 QQ 机器人上的 AI 剧本生成和视频发送功能（与渲染宿主通过 HTTP API 交互，零配置兼容）。
+QQ/Telegram 机器人上的 AI 剧本生成与视频发送插件（与渲染宿主通过 HTTP API 交互，零配置兼容）。
 
 **安装步骤：**
 
@@ -117,51 +138,61 @@ pip install -r requirements.txt
 
 **使用说明：**
 
-| 指令              | 别名                                          | 说明                 | 示例                       |
-| --------------- | ------------------------------------------- | ------------------ | ------------------------ |
-| `/视频对话 <消息>`     | `/视频生成` `/视频聊天`                             | 与瑞希对话，生成短视频回复      | `/视频对话 你好`                |
-| `/剧本生成 <场景>`     | `/剧本对话` `/故事生成` `/生成剧本` `/生成故事` `/story`     | 生成完整剧本视频           | `/剧本生成 深夜在Nightcord`      |
-| `/测试视频对话` `/测试剧本生成` | 见[插件文档](astrbot_plugin_msst/README.md)     | 维护模式下仅测试指令可用       | `/测试剧本生成 放学后的教室`          |
-| `/统计`           | `/stats` `/统计信息` `/导出统计`                     | 查看视频导出统计           | `/统计`                     |
+| 指令                 | 别名                                     | 说明                 | 示例                  |
+| -------------------- | ---------------------------------------- | -------------------- | --------------------- |
+| `/视频对话 <消息>`   | `/视频生成` `/视频聊天`                  | 与瑞希对话，生成短视频回复 | `/视频对话 你好`      |
+| `/剧本生成 <场景>`   | `/剧本对话` `/故事生成` `/生成剧本` `/生成故事` `/story` | 生成完整剧本视频 | `/剧本生成 深夜在Nightcord` |
+| `/测试视频对话` `/测试剧本生成` | 见[插件文档](astrbot_plugin_msst/README.md) | 维护模式下仅测试指令可用 | `/测试剧本生成 放学后的教室` |
+| `/统计`              | `/stats` `/统计信息` `/导出统计`         | 查看视频导出统计     | `/统计`               |
 
 管理指令使用 `/mssadmin` 指令组（均带中文别名）：
 
 | 指令                        | 说明           |
-| ------------------------- | ------------ |
-| `/mssadmin status`        | 插件与 API 连接状态 |
-| `/mssadmin queue`         | 查看队列详情       |
-| `/mssadmin cancel <任务ID>` | 取消排队中的任务     |
-| `/mssadmin cleanup`       | 清理临时文件       |
-| `/mssadmin setapi <URL>`  | 设置渲染宿主 API 地址 |
+| --------------------------- | -------------- |
+| `/mssadmin status`          | 插件与 API 连接状态 |
+| `/mssadmin queue`           | 查看队列详情   |
+| `/mssadmin cancel <任务ID>` | 取消排队中的任务 |
+| `/mssadmin cleanup`         | 清理临时文件   |
+| `/mssadmin setapi <URL>`    | 设置渲染宿主 API 地址 |
 
 > **提示**：完整指令别名、配置说明与故障排除见[插件文档](astrbot_plugin_msst/README.md)。
 
 **插件配置项（AstrBot WebUI）：**
 
-| 配置项                      | 说明                        | 默认值                     |
-| ------------------------ | ------------------------- | ----------------------- |
-| `llm_provider_id`        | 用于生成剧本的 LLM 提供商       | 留空使用当前默认           |
-| `mss_api_url`            | MySekaiStoryteller-API 渲染宿主地址 | `http://127.0.0.1:9881` |
-| `export_timeout`         | 视频导出超时时间（秒）               | `600`                   |
-| `max_concurrent_exports` | 最大并发导出数                   | `1`                     |
-| `temp_dir`               | 临时文件存储目录                  | 空（用插件数据目录）          |
-| `callback_api_base`      | AstrBot 文件服务外部可达地址（视频回传用） | 空（自动探测）             |
-| `test_mode`              | 维护模式（仅测试指令可用）             | `false`                 |
+| 配置项                     | 说明                        | 默认值                  |
+| -------------------------- | --------------------------- | ----------------------- |
+| `llm_provider_id`          | 用于生成剧本的 LLM 提供商   | 留空使用当前默认        |
+| `mss_api_url`              | MySekaiStoryteller-API 渲染宿主地址 | `http://127.0.0.1:9881` |
+| `export_timeout`           | 视频导出超时时间（秒）      | `600`                   |
+| `max_concurrent_exports`   | 最大并发导出数              | `1`                     |
+| `temp_dir`                 | 临时文件存储目录            | 空（用插件数据目录）    |
+| `callback_api_base`        | AstrBot 文件服务外部可达地址（视频回传用） | 空（自动探测） |
+| `test_mode`                | 维护模式（仅测试指令可用）  | `false`                 |
 
 ## API 接口
 
 渲染宿主启动后提供 HTTP API（默认 `http://0.0.0.0:9881`）：
 
-| 端点                                | 方法   | 说明        |
-| --------------------------------- | ---- | --------- |
-| `/api/v1/export`                  | POST | 提交故事导出视频  |
-| `/api/v1/export/:taskId/status`   | GET  | 查询任务状态    |
-| `/api/v1/export/:taskId/cancel`   | POST | 取消任务      |
-| `/api/v1/download/:filename`      | GET  | 下载导出的视频   |
-| `/api/v1/files`                   | GET  | 分页列出导出文件  |
-| `/api/v1/cleanup`                 | POST | 触发过期文件清理  |
-| `/api/v1/health`                  | GET  | 健康检查（含渲染池/GPU 状态） |
-| `/api/v1/status`                  | GET  | 队列状态      |
+| 端点                             | 方法 | 说明                 |
+| -------------------------------- | ---- | -------------------- |
+| `/api/v1/export`                 | POST | 提交故事导出视频     |
+| `/api/v1/export/:taskId/status`  | GET  | 查询任务状态         |
+| `/api/v1/export/:taskId/cancel`  | POST | 取消任务             |
+| `/api/v1/download/:filename`     | GET  | 下载导出的视频       |
+| `/api/v1/files`                  | GET  | 分页列出导出文件     |
+| `/api/v1/cleanup`                | POST | 触发过期文件清理     |
+| `/api/v1/health`                 | GET  | 健康检查（含渲染池/GPU 状态） |
+| `/api/v1/status`                 | GET  | 队列状态             |
+
+提交导出只需把完整故事 JSON 作为请求体：
+
+```bash
+curl -X POST http://127.0.0.1:9881/api/v1/export \
+  -H "Content-Type: application/json" \
+  -d @resources/stories/multi-character-demo.sekai-story.json
+```
+
+宿主会自动把请求留档一份到 `apifile/`，便于排查。
 
 ## 故事文件格式
 
@@ -186,9 +217,10 @@ pip install -r requirements.txt
 }
 ```
 
-- 故事内的 `model` / `image` 路径相对于**资源根** `resources/`（即 `resources/models/...`、`resources/images/...`），
-  宿主通过 `/resources/*` 提供访问
-- 通过 API 导出时直接在请求体中提交完整故事 JSON；宿主会自动留档一份到 `apifile/` 便于排查
+- 故事内的 `model` / `image` 路径相对于**资源根** `resources/`（即 `resources/models/...`、
+  `resources/images/...`），宿主通过 `/resources/*` 提供访问
+- 指令片段（`snippets`）的完整类型定义见 `src/common/types/Story.ts`，
+  也可参考随资源包提供的示例剧本
 
 ## 资源导入指南
 
@@ -208,11 +240,11 @@ pip install -r requirements.txt
 
 ### 背景图 / 语音 / BGM
 
-| 资源 | 存放位置 | 如何生效 |
-| --- | --- | --- |
-| 背景图 | `resources/images/` | 自动进入目录，插件提示词与校验即时可用 |
-| 故事语音 | `resources/voices/` | 故事 JSON 的 `voice` 字段按文件名引用 |
-| BGM | `resources/audio/bgm/` | 在宿主 `config.yaml` 的 `bgm.path` 指定（如 `audio/bgm/bg1.mp3`） |
+| 资源   | 存放位置               | 如何生效                                                    |
+| ------ | ---------------------- | ----------------------------------------------------------- |
+| 背景图 | `resources/images/`    | 自动进入目录，插件提示词与校验即时可用                      |
+| 故事语音 | `resources/voices/`  | 故事 JSON 的 `voice` 字段按文件名引用                       |
+| BGM    | `resources/audio/bgm/` | 在宿主 `config.yaml` 的 `bgm.path` 指定（如 `audio/bgm/bg1.mp3`） |
 
 ## TTS / BGM 配置
 
@@ -232,6 +264,7 @@ config.example.yaml   统一配置样例（复制为 config.yaml 使用，config
 src/host/             Node 宿主：API 服务 / 静态托管 / 桥接层 / 渲染池 / ffmpeg 编码
 src/webrender/        渲染工作进程页面（无头浏览器加载，构建产物在 out/webrenderer/）
 src/renderer/         渲染引擎（PixiJS + Live2D + 导出管线）
+src/common/           宿主与渲染侧共享的故事类型定义（Story.ts）
 src/shared/           宿主与渲染侧共享的 ffmpeg 模块
 resources/            资源根：models/ images/ voices/ audio/bgm/ stories/（不入库，见 resources/README.md）
 astrbot_plugin_msst/  AstrBot 机器人插件
@@ -249,8 +282,7 @@ docs/                 部署文档；deploy/ systemd 单元；scripts/ 测试与
 **Q: health 里 WebGL renderer 显示 SwiftShader / llvmpipe**
 
 WebGL 落到了软件渲染，导出会慢 5-10 倍，并且可能会遇到音画不同步等问题。
-Linux + NVIDIA 下尝试
-`MSS_CHROME_ARGS="--use-angle=gl"`，详见部署文档的参数调优章节。
+Linux + NVIDIA 下尝试 `MSS_CHROME_ARGS="--use-angle=gl"`，详见部署文档的参数调优章节。
 
 **Q: 视频导出失败或卡住**
 
@@ -271,6 +303,6 @@ Linux + NVIDIA 下尝试
 
 ## 致谢
 
-- [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 
+- [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller)
 - [Sekai-World/sekai-viewer](https://github.com/Sekai-World/sekai-viewer)
 - [lezzthanthree/SEKAI-Stories](https://github.com/lezzthanthree/SEKAI-Stories)
