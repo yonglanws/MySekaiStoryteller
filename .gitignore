@@ -279,6 +279,9 @@ tests/
 __pycache__/
 *.pyc
 
+# 插件在本目录内开发，但是独立 git 仓库（remote: astrbot_plugin_msst），主仓库不跟踪
+astrbot_plugin_msst/
+
 # 渲染内容资源不入库（模型/剧本/图片/音频；获取方式见 resources/README.md）
 resources/models/
 resources/stories/
