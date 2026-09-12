@@ -182,7 +182,9 @@ SNIPPET_SCHEMAS = {
                     "speaker": {"type": "string", "description": "说话者名字"},
                     "content": {"type": "string", "description": "对话内容，禁止换行"},
                     "modelId": {"type": "number", "default": -1},
-                    "voice": {"type": "string", "default": ""}
+                    "voice": {"type": "string", "default": ""},
+                    "motion": {"type": "string", "default": "", "description": "说话时的并发身体动作（边说边做），必须用该角色可用动作清单里的名字"},
+                    "facial": {"type": "string", "default": "", "description": "说话时的并发表情，可选"}
                 }
             }
         }
@@ -392,7 +394,8 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 
 - 严格交替，禁止一人连说3句以上
 - **Talk.modelId 必须与 speaker 严格对应**：{id_mapping}
-- 非说话角色在对方Talk前后加Motion(wait:false)做反应
+- **说话者边说边做**：每条 Talk 的 data 里必须带 motion（身体动作，匹配台词语气）和 facial（表情）；动作与说话同时进行，禁止为说话者单独添加 Motion 片段
+- **非说话角色的反应**才用独立 Motion(wait:false) 片段，插在对方 Talk 之间
 - 每个Talk含content（中文，最多3行含\n）和ttsText（日文翻译）
 
 ## 输出JSON骨架（必须严格遵循此结构）
@@ -414,11 +417,9 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
     {"type":"BlackIn","wait":true,"delay":0,"data":{"duration":800}},
     {"type":"LayoutAppear","wait":true,"delay":0,"data":{"modelId":1,"from":{"side":"Left","offset":-100},"to":{"side":"Left","offset":0},"motion":"w-happy-glad01","facial":"face_smile_01","facialFirst":true,"moveSpeed":"Normal"}},
     {"type":"LayoutAppear","wait":true,"delay":0.2,"data":{"modelId":2,"from":{"side":"Right","offset":100},"to":{"side":"Right","offset":0},"motion":"w-normal-default01","facial":"face_normal_01","facialFirst":true,"moveSpeed":"Normal"}},
-    {"type":"Motion","wait":true,"delay":0,"data":{"modelId":1,"motion":"w-happy-nod01","facial":"face_smile_01","facialFirst":true}},
-    {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"瑞希","content":"今天天气真好呢～\n要不要出去走走？","ttsText":"今日はいい天気だね～\nお散歩でも行かない？","modelId":1,"voice":"1"}},
+    {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"瑞希","content":"今天天气真好呢～\n要不要出去走走？","ttsText":"今日はいい天気だね～\nお散歩でも行かない？","modelId":1,"voice":"1","motion":"w-happy-nod01","facial":"face_smile_01"}},
     {"type":"Motion","wait":false,"delay":0.1,"data":{"modelId":2,"motion":"w-normal-nod01","facial":"face_smile_02","facialFirst":false}},
-    {"type":"Motion","wait":true,"delay":0,"data":{"modelId":2,"motion":"w-cool-tilthead01","facial":"face_normal_01","facialFirst":true}},
-    {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"绘名","content":"嗯，正好我也想出去透透气。","ttsText":"うん、ちょうど外の空気を吸いたいと思ってた。","modelId":2,"voice":"1"}},
+    {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"绘名","content":"嗯，正好我也想出去透透气。","ttsText":"うん、ちょうど外の空気を吸いたいと思ってた。","modelId":2,"voice":"1","motion":"w-cool-tilthead01","facial":"face_normal_01"}},
     {"type":"Motion","wait":false,"delay":0.15,"data":{"modelId":1,"motion":"w-cute-glad01","facial":"face_sparkling_01","facialFirst":false}}
   ]
 }
@@ -429,6 +430,7 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 - snippets必须是数组，不能省略
 - 双人场景models数组必须包含2个不同角色
 - models 数组顺序与登场顺序一致：先登场的角色元素在前
+- 说话者的动作/表情写在 Talk 的 motion/facial 字段里（与说话同时进行）；独立的 Motion 片段只给非说话角色用
 
 ## 可用动作（按角色分组；使用"前缀+编号"形式的完整动作名，必须用对应角色的前缀）
 {motion_list}
@@ -449,8 +451,8 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 7. **检查models数组：每个角色的model路径必须与对照表一致，绝不能全部写成同一个模型**
 8. 无退场序列，无Telop
 9. delay用0、0.05、0.1、0.15、0.2
-10. 每个Talk含content（中文，最多3行）和ttsText（日文翻译）
-11. 双人必须交替对话，非说话角色加反应动作
+10. 每个Talk含content（中文，最多3行）、ttsText（日文翻译），以及motion和facial（说话时的并发动作与表情，必须来自该角色的可用清单）
+11. **说话者的动作写在Talk的motion字段（边说边做）**；独立Motion片段只用于非说话角色的反应
 12. 对话/互动场景自动用双人模式
 
 场景：{scene}"""
@@ -552,9 +554,10 @@ CHAT_MODE_PROMPT_TEMPLATE = r"""# {chat_name}（{chat_en_name}）聊天模式
 每个Talk必须包含content（中文）和ttsText（日文翻译）。
 
 ### 标准对话单元
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_name}", "content": "回复内容～", "ttsText": "返信内容～", "modelId": {chat_model_id}, "voice": "1"}},
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_name}", "content": "回复内容～", "ttsText": "返信内容～", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_motion_a}", "facial": "{chat_facial_a}"}},
 {"type": "Motion", "wait": false, "delay": 0.3, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_b}", "facial": "{chat_facial_b}", "facialFirst": true}}
+
+> 说话者的动作直接写在 Talk 的 motion/facial 字段里（与说话同时进行）；独立的 Motion 片段只用于句间的附加反应。
 
 ### 聊天模式的snippets结构（简化版开场，无退场动画）
 聊天模式需要完整的开场来显示背景和角色，但不需要退场动画：
@@ -579,11 +582,9 @@ ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear
 {"type": "BlackIn", "wait": true, "delay": 0, "data": {"duration": 800}},
 {"type": "LayoutAppear", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "from": {"side": "Right", "offset": 0}, "to": {"side": "Center", "offset": 0}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true, "moveSpeed": "Normal"}},
 {"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "你好呀！", "ttsText": "やっほー！", "modelId": {chat_model_id}, "voice": "1"}},
-{"type": "Motion", "wait": false, "delay": 0.1, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_b}", "facial": "{chat_facial_b}", "facialFirst": true}},
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "你好呀！", "ttsText": "やっほー！", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_motion_b}", "facial": "{chat_facial_b}"}},
 {"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_c}", "facial": "{chat_facial_d}", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": {chat_model_id}, "voice": "1"}},
-{"type": "Motion", "wait": false, "delay": 0.15, "data": {"modelId": {chat_model_id}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true}}
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_default_motion}", "facial": "{chat_facial_c}"}}
 
 ## 输出要求
 1. 合法JSON，无额外文字
@@ -592,7 +593,7 @@ ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear
 4. LayoutAppear中的motion和facial就是初始姿态，不需要额外的初始化Motion
 5. 无退场序列，无Telop
 6. delay用0、0.05、0.1、0.15、0.2
-7. speaker="{chat_name}"，modelId={chat_model_id}，voice="1"
+7. speaker="{chat_name}"，modelId={chat_model_id}，voice="1"；每条 Talk 必须带 motion（说话时的并发动作）和 facial（表情）
 8. models=[{"id":{chat_model_id},"model":"{chat_model_path}","normal_scale":2.1,"small_scale":1.8,"anchor":0.5}]
 9. images=[{"id":1,"image":"{chat_image}"}]
 
@@ -1431,6 +1432,17 @@ class MySekaiStorytellerPlugin(Star):
                 data["content"] = content
                 data["modelId"] = self._to_number(data.get("modelId"), default_model.get("id", 1))
                 data["voice"] = self._to_str(data.get("voice"), "")
+                # 说话并发动作/表情：非法值回退该角色默认；空串 = 保持当前姿态不播
+                talk_motion = self._clean_path(self._to_str(data.get("motion"), ""))
+                if talk_motion and talk_motion not in view.valid_motions(data["modelId"]):
+                    logger.warning(f"Talk motion '{talk_motion}' not available for {view.name_by_id(data['modelId'])}, falling back to {view.default_motion(data['modelId'])}")
+                    talk_motion = view.default_motion(data["modelId"])
+                data["motion"] = talk_motion
+                talk_facial = self._clean_path(self._to_str(data.get("facial"), ""))
+                if talk_facial and talk_facial not in view.valid_facials(data["modelId"]):
+                    logger.warning(f"Talk facial '{talk_facial}' not available for {view.name_by_id(data['modelId'])}, falling back to {view.default_facial(data['modelId'])}")
+                    talk_facial = view.default_facial(data["modelId"])
+                data["facial"] = talk_facial
                 snippet["data"] = data
 
             elif snippet_type == "LayoutAppear":

@@ -74,15 +74,20 @@ export default class AdvancedModel extends Live2DModel {
     this.logger = getSubLogger(`AdvancedModel(${this._metadata.id})`)
   }
 
-  public async applyMotion(motion: string, ignoreParams: boolean = false): Promise<void> {
+  public async applyMotion(
+    motion: string,
+    ignoreParams: boolean = false,
+    extraIgnoreParamIds: string[] = []
+  ): Promise<void> {
     const manager = this.internalModel.parallelMotionManager[0]
-    if (ignoreParams) {
-      await manager.startMotion(motion, 0, MotionPriority.FORCE, [
-        'ParamEyeROpen',
-        'ParamEyeLOpen',
-        'ParamEyeballX',
-        'ParamEyeballY'
-      ])
+    if (ignoreParams || extraIgnoreParamIds.length > 0) {
+      const ignoreParamIds = [
+        ...(ignoreParams
+          ? ['ParamEyeROpen', 'ParamEyeLOpen', 'ParamEyeballX', 'ParamEyeballY']
+          : []),
+        ...extraIgnoreParamIds
+      ]
+      await manager.startMotion(motion, 0, MotionPriority.FORCE, ignoreParamIds)
     } else {
       await manager.startMotion(motion, 0, MotionPriority.FORCE)
     }

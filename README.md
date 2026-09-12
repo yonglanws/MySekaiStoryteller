@@ -13,16 +13,18 @@
  </div>
 </div>
 
-> [!CAUTION]
-> **本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
-> **不保证大部分功能的可用性与稳定性**。当前仅核心导出链路在有限环境下验证通过，Linux + NVIDIA 生产环境尚待实测。
-> 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller/issues)。
-
 > [!IMPORTANT]
 > 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 二次开发，
 > 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**，用于在无桌面环境的 Linux 服务器上
 > 提供 Live2D 视频渲染服务。如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
 > [Untitled-Story](https://github.com/Untitled-Story) 组织。
+
+
+> [!CAUTION]
+> **本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
+> **不保证大部分功能的可用性与稳定性**。当前仅核心导出链路在有限环境下验证通过，Linux + NVIDIA 生产环境尚待实测。
+> 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller/issues)。
+
 
 ## 项目简介
 
@@ -245,13 +247,11 @@ WebGL 落到了软件渲染，导出会慢 5-10 倍。Linux + NVIDIA 下尝试
 ## 许可证
 
 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller)
-二次开发，沿用 **[GNU GPL v3](LICENSE)** 许可证开源；导出视频的使用另受
+二次开发，沿用 **[GNU GPL v3](LICENSE)** 许可证开源；导出视频的使用另受原项目中的
 [VIDEO-LICENSE-CN.md](VIDEO-LICENSE-CN.md) 约束。
 
 ## 致谢
 
 - [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) — 本项目的基底，感谢原作者 [GuangChen2333](https://github.com/GuangChen2333)
-- [Project SEKAI](https://pjsekai.sega.jp/) - 灵感和资源来源
-- [Live2D Cubism](https://www.live2d.com/) - Live2D 渲染引擎
-- [Playwright](https://playwright.dev/) - 无头浏览器自动化
-- [FFmpeg](https://ffmpeg.org/) - 视频编码和音频处理
+- [Sekai-World/sekai-viewer](https://github.com/Sekai-World/sekai-viewer)
+- [lezzthanthree/SEKAI-Stories](https://github.com/lezzthanthree/SEKAI-Stories)

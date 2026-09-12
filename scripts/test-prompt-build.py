@@ -145,6 +145,7 @@ async def run(base_url: str) -> int:
     check("剧本 prompt 含背景清单", view.data.get("images", [])[0] in user_prompt)
     check("剧本 prompt 含场景", "深夜在Nightcord" in user_prompt)
     check("剧本 prompt 无旧版四段式路径", "19ena_normal_3.0_f_t05/19ena_normal" not in user_prompt)
+    check("剧本 prompt 示例含 Talk 并发动作", '"motion":"w-happy-nod01"' in user_prompt and "说话者边说边做" in user_prompt)
 
     # --- 聊天模式 ---
     _, chat_prompt = s._build_chat_prompt("你好呀", "test-user")

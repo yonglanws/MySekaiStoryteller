@@ -13,6 +13,8 @@ interface TalkData {
     content: string
     modelId: number
     voice: string
+    motion?: string
+    facial?: string
   }
 }
 
@@ -176,6 +178,25 @@ export default class TalkSnippet extends BaseSnippet {
     const hasModel = talkData.data.modelId !== -1
     if (!this.app.layerUI.UITalkShowed) {
       await this.app.layerUI.showTextBackground()
+    }
+
+    // 说话并发动作：Talk 开始时即触发身体动作/表情（不等待播完），
+    // 动作剔除眼部与嘴部参数——眼睛归当前表情/眨眼，嘴型归口型动画，互不踩踏。
+    // 动作短于台词时经 fade-out 自然回到基础姿态，长于台词时被下一个 Motion 片段切换。
+    if (hasModel) {
+      const model = this.app.getModelById(talkData.data.modelId)
+      const gesture = talkData.data.motion?.trim()
+      const facial = talkData.data.facial?.trim()
+      if (gesture) {
+        model.applyMotion(gesture, true, [MOUTH_PARAM_ID]).catch((e) => {
+          this.logger.warn(`Talk concurrent motion '${gesture}' failed`, e)
+        })
+      }
+      if (facial) {
+        model.applyFacial(facial).catch((e) => {
+          this.logger.warn(`Talk concurrent facial '${facial}' failed`, e)
+        })
+      }
     }
 
     const waits: Promise<unknown>[] = []

@@ -106,7 +106,11 @@ const SnippetSchema = z.discriminatedUnion('type', [
       content: z.string(),
       modelId: z.number().default(-1),
       voice: z.string().default(''),
-      ttsText: z.string().default('')
+      ttsText: z.string().default(''),
+      /** 说话时的并发身体动作（与台词同时开始，短于台词则自然淡出回基础姿态） */
+      motion: z.string().default(''),
+      /** 说话时的并发表情切换（可选，缺省保持当前表情） */
+      facial: z.string().default('')
     })
   }),
   z.object({

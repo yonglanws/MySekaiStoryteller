@@ -1,0 +1,117 @@
+{
+  "models": [
+    {
+      "id": 1,
+      "model": "20mizuki/20mizuki_normal/20mizuki_normal.model3.json",
+      "normal_scale": 2.1,
+      "small_scale": 1.8,
+      "anchor": 0.5
+    }
+  ],
+  "images": [
+    {
+      "id": 1,
+      "image": "bg_e000401.jpg"
+    }
+  ],
+  "snippets": [
+    {
+      "type": "ChangeLayoutMode",
+      "wait": false,
+      "delay": 0,
+      "data": { "mode": "Normal" }
+    },
+    {
+      "type": "BlackOut",
+      "wait": true,
+      "delay": 0,
+      "data": { "duration": 500 }
+    },
+    {
+      "type": "ChangeBackgroundImage",
+      "wait": true,
+      "delay": 0,
+      "data": { "imageId": 1 }
+    },
+    {
+      "type": "BlackIn",
+      "wait": true,
+      "delay": 0,
+      "data": { "duration": 800 }
+    },
+    {
+      "type": "LayoutAppear",
+      "wait": true,
+      "delay": 0,
+      "data": {
+        "modelId": 1,
+        "from": { "side": "Right", "offset": 0 },
+        "to": { "side": "Center", "offset": 0 },
+        "motion": "w-normal-default01",
+        "facial": "face_smile_01",
+        "facialFirst": true,
+        "moveSpeed": "Normal"
+      }
+    },
+    {
+      "type": "Motion",
+      "wait": true,
+      "delay": 0,
+      "data": { "modelId": 1, "motion": "w-happy-glad01", "facial": "face_smile_01", "facialFirst": true }
+    },
+    {
+      "type": "Talk",
+      "wait": false,
+      "delay": 0,
+      "data": {
+        "speaker": "瑞希",
+        "content": "这个渲染框架现在可以边说话边做动作了哦～\n有没有感觉自然多了？",
+        "ttsText": "このフレームワーク、今から喋りながら動けるようになったんだよ〜\nなんか自然に感じない？",
+        "modelId": 1,
+        "voice": "",
+        "motion": "w-happy-nod01",
+        "facial": "face_smile_01"
+      }
+    },
+    {
+      "type": "Talk",
+      "wait": false,
+      "delay": 0.1,
+      "data": {
+        "speaker": "瑞希",
+        "content": "说话的时候，身体会跟着台词的语气一起动，",
+        "ttsText": "喋ってる時、体がセリフの気分に合わせて一緒に動くの。",
+        "modelId": 1,
+        "voice": "",
+        "motion": "w-happy-glad01",
+        "facial": "face_smile_01"
+      }
+    },
+    {
+      "type": "Motion",
+      "wait": true,
+      "delay": 0,
+      "data": { "modelId": 1, "motion": "w-cute-tilthead01", "facial": "face_smile_01", "facialFirst": true }
+    },
+    {
+      "type": "Talk",
+      "wait": false,
+      "delay": 0.1,
+      "data": {
+        "speaker": "瑞希",
+        "content": "就像现在这样！动作和台词是同时进行的。",
+        "ttsText": "ほら、今みたいに！動きとセリフは同時に進行中なんだ。",
+        "modelId": 1,
+        "voice": "",
+        "motion": "w-cute-nod01",
+        "facial": "face_smile_01"
+      }
+    },
+    {
+      "type": "Motion",
+      "wait": true,
+      "delay": 0,
+      "data": { "modelId": 1, "motion": "w-normal-default01", "facial": "face_smile_01", "facialFirst": true }
+    }
+  ]
+}
