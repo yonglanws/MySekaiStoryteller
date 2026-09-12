@@ -53,11 +53,16 @@ export default class LayoutAppearSnippet extends BaseSnippet {
 
     const show_task = model.show(200, this.data.data.hologram)
 
-    if (from.x !== to.x || from.y !== to.y) {
+    const is_moved = from.x !== to.x || from.y !== to.y
+
+    if (is_moved) {
+      // 有位移：先把模型放到滑入起点，再由 move() 插值到终点
+      model.setPositionRel(this.app.stage_size, from)
+    } else {
+      // 无位移登场（from == to）：直接落位到目标点。
+      // 此前缺少这一步，原地登场的模型停留在默认坐标 (0,0) 而出画。
       model.setPositionRel(this.app.stage_size, to)
     }
-
-    const is_moved = from.x !== to.x || from.y !== to.y
 
     // 开始平移时立即阻止idle，确保平移过程中也是正确姿态
     if (is_moved) {
