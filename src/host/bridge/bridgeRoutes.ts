@@ -231,7 +231,11 @@ export function createBridgeRouter(deps: BridgeDeps): Router {
         const response = await fetch(payload.url, {
           method: payload.method,
           headers: payload.headers,
-          body: payload.method !== 'GET' ? payload.body : undefined,
+          // GET/HEAD 请求不允许携带 body（Node fetch 会直接抛 TypeError）
+          body:
+            payload.method !== 'GET' && payload.method !== 'HEAD'
+              ? payload.body
+              : undefined,
           signal: AbortSignal.timeout(30000)
         })
         const arrayBuffer = await response.arrayBuffer()
@@ -263,7 +267,11 @@ export function createBridgeRouter(deps: BridgeDeps): Router {
         const response = await fetch(payload.url, {
           method: payload.method,
           headers: payload.headers,
-          body: payload.method !== 'GET' ? payload.body : undefined
+          // GET/HEAD 请求不允许携带 body（Node fetch 会直接抛 TypeError）
+          body:
+            payload.method !== 'GET' && payload.method !== 'HEAD'
+              ? payload.body
+              : undefined
         })
         const text = await response.text()
         res.setHeader('x-mss-status', String(response.status))

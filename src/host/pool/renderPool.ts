@@ -69,7 +69,16 @@ export class RenderPool implements ExportDispatcher {
 
   onExportResult: ((taskId: string, result: ExportResultPayload) => void) | null = null
 
-  constructor(logger: Logger<ILogObj>, config: HostConfig, hub: WsHub) {
+  constructor(
+    logger: Logger<ILogObj>,
+    config: HostConfig,
+    hub: WsHub,
+    private readonly catalog?: {
+      get(): {
+        models: Array<{ id: number; name: string; shortName?: string }>
+      }
+    }
+  ) {
     this.logger = logger
     this.config = config
     this.hub = hub
@@ -369,8 +378,9 @@ export class RenderPool implements ExportDispatcher {
       story: task.story,
       outputPath: task.outputPath,
       videoConfig: task.videoConfig,
-      // TTS/BGM 配置由宿主统一下发，渲染器不再读配置文件
-      tts: { ...this.config.tts },
+      // TTS/BGM 配置由宿主统一下发，渲染器不再读配置文件。
+      // 角色名按 models.yaml 展开"全名/短名"双别名——剧本 speaker 可能用任一形式
+      tts: { ...this.config.tts, characters: this.expandTtsCharacterAliases() },
       bgm: { ...this.config.bgm }
     }
 
@@ -389,6 +399,37 @@ export class RenderPool implements ExportDispatcher {
   cancel(taskId: string): void {
     // 与原实现一致：取消只影响等待中的 HTTP 响应，渲染侧自然完成
     this.logger.info(`[Pool] Cancel requested for task ${taskId}`)
+  }
+
+  /**
+   * TTS 角色配置的名称别名展开：
+   * config.tts.characters 里的 characterName 是用户配置的（通常为模型全名，如"晓山瑞希"），
+   * 而剧本 Talk.speaker 可能用短名（"瑞希"，models.yaml shortName）或全名。
+   * 为每个已配置角色补充短名条目，渲染端按 speaker 精确查找即可命中。
+   */
+  private expandTtsCharacterAliases() {
+    const characters = this.config.tts.characters
+    if (!this.catalog || characters.length === 0) return characters
+
+    const models = this.catalog.get().models
+    const expanded = [...characters]
+    for (const entry of characters) {
+      const model = models.find((m) => m.name === entry.characterName)
+      const shortName = model?.shortName
+      if (
+        shortName &&
+        shortName !== entry.characterName &&
+        !expanded.some((c) => c.characterName === shortName)
+      ) {
+        expanded.push({ ...entry, characterName: shortName })
+      }
+    }
+    if (expanded.length !== characters.length) {
+      this.logger.info(
+        `[Pool] TTS characters expanded with short-name aliases: ${expanded.map((c) => c.characterName).join(', ')}`
+      )
+    }
+    return expanded
   }
 
   private pickIdleWorker(): WorkerState | null {

@@ -131,7 +131,15 @@ export class TTSService {
   }
 
   getCharacterVoice(characterName: string): CharacterVoiceConfig | undefined {
-    return this.characterConfigs.get(characterName)
+    const exact = this.characterConfigs.get(characterName)
+    if (exact) return exact
+    // 兜底：speaker 与配置名"全名/短名"不完全一致时做包含匹配（如"瑞希" ↔ "晓山瑞希"）
+    for (const [name, config] of this.characterConfigs) {
+      if (name.includes(characterName) || characterName.includes(name)) {
+        return config
+      }
+    }
+    return undefined
   }
 
   clearCache(): void {
@@ -184,7 +192,7 @@ export class TTSService {
       }
     }
 
-    const charConfig = this.characterConfigs.get(characterName)
+    const charConfig = this.getCharacterVoice(characterName)
     const refAudioPath = charConfig?.refAudioPath || this.config.defaultRefAudioPath
     const promptText = charConfig?.promptText || this.config.defaultPromptText
     const promptLang = charConfig?.promptLang || this.config.promptLang

@@ -50,9 +50,9 @@ async function bootstrap(): Promise<void> {
     onWorkerDisconnected: (workerId) => pool.handleWorkerDisconnected(workerId)
   })
 
-  const pool = new RenderPool(logger, config, hub)
-
   const resourceCatalog = new ResourceCatalog(logger, config)
+
+  const pool = new RenderPool(logger, config, hub, resourceCatalog)
 
   const apiServer = new VideoApiServer(logger, {
     port: config.server.port,
