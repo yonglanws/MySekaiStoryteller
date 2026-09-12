@@ -12,16 +12,18 @@
   <img src="https://img.shields.io/badge/ffmpeg-20B2AA?style=for-the-badge&logoColor=white&logo=ffmpeg" alt="FFmpeg" style="margin-top: 0; margin-right: 5px;" />
   <img src="https://img.shields.io/badge/license-GPL--3.0-20B2AA?style=for-the-badge" alt="GPL 3.0" style="margin-top: 0;" />
  </div>
+
  <p>
   <a href="#项目简介">项目简介</a> ·
   <a href="#快速开始">快速开始</a> ·
-  <a href="#astrbot-插件">AstrBot 插件</a> ·
   <a href="#api-接口">API 接口</a> ·
   <a href="#故事文件格式">故事文件格式</a> ·
   <a href="#资源导入指南">资源导入</a> ·
   <a href="#tts--bgm-配置">TTS / BGM</a> ·
+  <a href="#部署">部署</a> ·
   <a href="#项目结构">项目结构</a> ·
-  <a href="#故障排除">故障排除</a>
+  <a href="#故障排除">故障排除</a> ·
+  <a href="#相关项目">相关项目</a>
  </p>
 </div>
 
@@ -39,8 +41,9 @@
 ## 项目简介
 
 接收 `*.sekai-story.json` 故事剧本，用 Live2D（Project SEKAI 风格）渲染并导出为 MP4 视频，
-通过 HTTP API 对外提供服务。典型用法：部署在一台带 GPU 的服务器上，配合
-[AstrBot 插件](astrbot_plugin_msst/) 实现 QQ/Telegram 机器人的 AI 剧本生成与视频自动发送。
+通过 HTTP API 对外提供服务。典型用法：部署在一台带 GPU 的服务器上，配合官方
+[AstrBot 插件](https://github.com/yonglanws/astrbot_plugin_msst) 实现 QQ/Telegram 机器人的
+AI 剧本生成与视频自动发送。
 
 | 特性     | 说明                                                                       |
 | -------- | -------------------------------------------------------------------------- |
@@ -88,10 +91,9 @@ npm run e2e                        # 示例故事导出 + 产物断言（编码/
 node scripts/test-parallel.mjs 2   # 并发导出验证
 ```
 
-### 资源准备（必需）
+### 资源准备
 
-**本仓库不附带渲染资源**（Live2D 模型、背景图、语音、BGM、示例剧本）——为控制仓库体积并
-遵循素材版权要求，仓库只保留目录结构，资源需自行放入（详见
+**本仓库不附带渲染资源**：仓库只保留目录结构，资源需自行放入（详见
 [resources/README.md](resources/README.md)）：
 
 ```
@@ -103,71 +105,8 @@ resources/
 └─ stories/      *.sekai-story.json 剧本
 ```
 
-```bash
-# 方式一：从上游仓库整体拷贝 resources/（模型/背景/剧本/BGM 齐全，按需取舍）
-git clone --depth 1 https://github.com/Untitled-Story/MySekaiStoryteller /tmp/upstream
-cp -r /tmp/upstream/resources/. resources/
-
-# 方式二：使用你已有的资源包，按上面的目录结构放入
-```
-
 资源根不强制叫 `resources/`：可在 `config.yaml` 的 `paths.resources` 或环境变量
 `MSS_RESOURCE_DIR` 指向任意目录。
-
-### Linux 服务器部署（NVIDIA 硬件加速）
-
-详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、资源准备、配置说明、
-systemd 单元、NVENC 验证三步与无 GPU 时的参数调优。
-
-## AstrBot 插件
-
-QQ/Telegram 机器人上的 AI 剧本生成与视频发送插件（与渲染宿主通过 HTTP API 交互，零配置兼容）。
-
-**安装步骤：**
-
-```bash
-# 1. 复制插件到 AstrBot
-cp -r astrbot_plugin_msst AstrBot/data/plugins/MySekaiStoryteller
-
-# 2. 安装依赖
-cd AstrBot/data/plugins/MySekaiStoryteller
-pip install -r requirements.txt
-
-# 3. 在 AstrBot WebUI 中点击"重载插件"
-```
-
-**使用说明：**
-
-| 指令                 | 别名                                     | 说明                 | 示例                  |
-| -------------------- | ---------------------------------------- | -------------------- | --------------------- |
-| `/视频对话 <消息>`   | `/视频生成` `/视频聊天`                  | 与瑞希对话，生成短视频回复 | `/视频对话 你好`      |
-| `/剧本生成 <场景>`   | `/剧本对话` `/故事生成` `/生成剧本` `/生成故事` `/story` | 生成完整剧本视频 | `/剧本生成 深夜在Nightcord` |
-| `/测试视频对话` `/测试剧本生成` | 见[插件文档](astrbot_plugin_msst/README.md) | 维护模式下仅测试指令可用 | `/测试剧本生成 放学后的教室` |
-| `/统计`              | `/stats` `/统计信息` `/导出统计`         | 查看视频导出统计     | `/统计`               |
-
-管理指令使用 `/mssadmin` 指令组（均带中文别名）：
-
-| 指令                        | 说明           |
-| --------------------------- | -------------- |
-| `/mssadmin status`          | 插件与 API 连接状态 |
-| `/mssadmin queue`           | 查看队列详情   |
-| `/mssadmin cancel <任务ID>` | 取消排队中的任务 |
-| `/mssadmin cleanup`         | 清理临时文件   |
-| `/mssadmin setapi <URL>`    | 设置渲染宿主 API 地址 |
-
-> **提示**：完整指令别名、配置说明与故障排除见[插件文档](astrbot_plugin_msst/README.md)。
-
-**插件配置项（AstrBot WebUI）：**
-
-| 配置项                     | 说明                        | 默认值                  |
-| -------------------------- | --------------------------- | ----------------------- |
-| `llm_provider_id`          | 用于生成剧本的 LLM 提供商   | 留空使用当前默认        |
-| `mss_api_url`              | MySekaiStoryteller-API 渲染宿主地址 | `http://127.0.0.1:9881` |
-| `export_timeout`           | 视频导出超时时间（秒）      | `600`                   |
-| `max_concurrent_exports`   | 最大并发导出数              | `1`                     |
-| `temp_dir`                 | 临时文件存储目录            | 空（用插件数据目录）    |
-| `callback_api_base`        | AstrBot 文件服务外部可达地址（视频回传用） | 空（自动探测） |
-| `test_mode`                | 维护模式（仅测试指令可用）  | `false`                 |
 
 ## API 接口
 
@@ -231,8 +170,8 @@ curl -X POST http://127.0.0.1:9881/api/v1/export \
    `FileReferences.Motions` 索引——**动作文件跟着模型走，不需要单独登记**）
 2. 在 `resources/models/models.yaml` 登记一行（`id` 全表唯一、`name` 角色全名、
    `shortName` 简称、`path` 以磁盘实际文件名为准）
-3. 完成。宿主 30 秒内自动识别；AstrBot 插件 5 分钟内自动感知（可发 `/mssadmin resources` 确认），
-   提示词中的角色对照表、动作/表情清单、校验白名单**全部自动更新，无需改任何代码**
+3. 完成。宿主 30 秒内自动识别，提示词中的角色对照表、动作/表情清单、校验白名单
+   **全部自动更新，无需改任何代码**；AstrBot 插件 5 分钟内自动感知（可发 `/mssadmin resources` 确认）
 
 > 插件端为「晓山瑞希/东云绘名/宵崎奏/朝比奈真冬」内置了详细人设档案；
 > 新角色会生成通用档案条目由 LLM 依据角色名演绎。如需为新角色定制 TTS 音色，
@@ -257,6 +196,16 @@ curl -X POST http://127.0.0.1:9881/api/v1/export \
 3. BGM 放在 `resources/audio/bgm/` 下，`bgm.path` 填相对资源根的路径（如 `audio/bgm/bg1.mp3`）
 4. `tts.enabled: false` 可整体关闭配音；无 TTS 时导出仍会成功，只是没有角色配音
 
+## 部署
+
+一台 Linux + NVIDIA 驱动的服务器即可获得硬件加速渲染与 NVENC 编码，**无需桌面环境、
+无需 Xorg/Xvfb**。完整指南见 **[docs/host-deployment.md](docs/host-deployment.md)**：
+
+- 裸机依赖与资源准备
+- `config.yaml` 字段说明与 `MSS_*` 环境变量对照表
+- systemd 单元（`deploy/mysekai-host.service`）
+- NVENC 验证三步与无 GPU 时的 Chrome 参数调优
+
 ## 项目结构
 
 ```
@@ -267,7 +216,6 @@ src/renderer/         渲染引擎（PixiJS + Live2D + 导出管线）
 src/common/           宿主与渲染侧共享的故事类型定义（Story.ts）
 src/shared/           宿主与渲染侧共享的 ffmpeg 模块
 resources/            资源根：models/ images/ voices/ audio/bgm/ stories/（不入库，见 resources/README.md）
-astrbot_plugin_msst/  AstrBot 机器人插件
 out-host/             宿主编译产物（npm run build:host 生成）
 docs/                 部署文档；deploy/ systemd 单元；scripts/ 测试与工具脚本
 ```
@@ -290,10 +238,10 @@ Linux + NVIDIA 下尝试 `MSS_CHROME_ARGS="--use-angle=gl"`，详见部署文档
 - 尝试降低 `render.workers`（显存/内存不足时）
 - 确认 `video.encoder` 对应的硬件在当前机器可用（失败会自动回退 CPU）
 
-**Q: AstrBot 插件无法连接**
+## 相关项目
 
-- 确认 `mss_api_url` 配置正确
-- `curl http://<服务器>:9881/api/v1/health` 确认宿主存活
+- [astrbot_plugin_msst](https://github.com/yonglanws/astrbot_plugin_msst) ——
+  官方 AstrBot 插件：AI 剧本生成、队列调度与机器人视频回传，通过 HTTP API 与本宿主交互
 
 ## 许可证
 

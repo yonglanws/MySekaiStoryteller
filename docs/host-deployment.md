@@ -17,7 +17,8 @@ Node 20 宿主（单进程 + N 个无头浏览器渲染工作进程）
 导出数据流（与旧版语义一致）：
 `POST /api/v1/export` → 队列（≤2 并发）→ 渲染页面 MediaRecorder 录 WebM（分块回传写盘）
 → Web Audio 混音 WAV → ffmpeg 转码/合流 MP4 → `downloadUrl` 供下载。
-AstrBot 插件（`astrbot_plugin_msst/`）**零改动兼容**。
+AstrBot 插件（[astrbot_plugin_msst](https://github.com/yonglanws/astrbot_plugin_msst)，
+独立仓库）**零改动兼容**。
 
 ## 依赖
 
@@ -40,19 +41,10 @@ npm run build                     # typecheck + vite(webrenderer) + tsc(host)
 npm start                         # node out-host/host/main.js
 ```
 
-### 资源准备（必需）
+### 资源准备
 
-仓库**不附带**渲染资源。首次部署需把 Live2D 模型、背景图、BGM、示例剧本放入资源根
-（默认 `resources/`，可用 `MSS_RESOURCE_DIR` 指向他处）：
-
-```bash
-# 方式一：从上游仓库整体拷贝 resources/（模型/背景/剧本/BGM 齐全，按需取舍）
-git clone --depth 1 https://github.com/Untitled-Story/MySekaiStoryteller /tmp/upstream
-cp -r /tmp/upstream/resources/. resources/
-
-# 方式二：使用你已有的资源包，按 resources/README.md 的目录结构放入
-```
-
+仓库**不附带**渲染资源，需自行把 Live2D 模型、背景图、BGM、示例剧本放入资源根
+（默认 `resources/`，可用 `MSS_RESOURCE_DIR` 指向他处）。
 目录结构与登记方式见 [resources/README.md](../resources/README.md)。
 
 ## 配置（config.yaml）

@@ -1,6 +1,0 @@
-name: MySekaiStoryteller
-author: Untitled-Story
-description: 'MySekaiStoryteller 视频生成插件 - 基于 AI 生成 JSON 剧本并渲染视频'
-version: '1.0.0'
-repo: https://github.com/yonglanws/MySekaiStoryteller-API
-license: GPL-3.0

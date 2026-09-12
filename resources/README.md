@@ -11,9 +11,4 @@ resources/
 └─ stories/      *.sekai-story.json 剧本
 ```
 
-获取方式（任选其一）：
-
-1. 从上游仓库 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 的 `resources/` 目录拷贝；
-2. 使用你已有的资源包，按上面目录结构放入。
-
 资源根不强制叫 `resources/`：可在 `config.yaml` 的 `paths.resources` 或环境变量 `MSS_RESOURCE_DIR` 指向任意目录。新增模型后只需在 `resources/models/models.yaml` 登记一行，宿主会自动识别，详见主 README 的「资源导入指南」。
