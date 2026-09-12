@@ -6,7 +6,6 @@ on:
       - 'v*'
     paths:
       - 'src/**/*'
-      - 'resources/**/*'
       - 'package.json'
   workflow_dispatch:
 
@@ -38,15 +37,16 @@ jobs:
       - name: Pack deployable bundle
         run: |
           mkdir -p bundle
-          cp -r out out-host resources user-configs bundle/
+          cp -r out out-host bundle/
+          cp -r user-configs bundle/ 2>/dev/null || true
           cp package.json package-lock.json README.md bundle/ 2>/dev/null || true
-          tar -czf mysekai-storyteller-host-${GITHUB_REF_NAME}.tar.gz -C bundle .
+          tar -czf mysekai-storyteller-api-host-${GITHUB_REF_NAME}.tar.gz -C bundle .
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: host-bundle
-          path: mysekai-storyteller-host-*.tar.gz
+          path: mysekai-storyteller-api-host-*.tar.gz
           if-no-files-found: error
 
   release:
@@ -75,7 +75,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          name: MySekaiStoryteller Host ${{ github.ref_name }}
+          name: MySekaiStoryteller-API Host ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ steps.pre.outputs.is_prerelease }}
           files: build-artifacts/*
