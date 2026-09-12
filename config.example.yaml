@@ -18,11 +18,11 @@ server:
 # 视频导出参数
 # ---------------------------------------------------------------------------
 video:
-  width: 1280         # 输出视频宽度
-  height: 720         # 输出视频高度
-  fps: 30             # 帧率
+  width: 1920         # 输出视频宽度
+  height: 1080         # 输出视频高度
+  fps: 60             # 帧率
   crf: 28             # 质量因子（越小质量越高、体积越大）
-  renderScale: 1.5    # 渲染超采样倍率（1 = 1:1，1.5 = 抗锯齿更好、更吃性能）
+  renderScale: 1    # 渲染超采样倍率（1 = 1:1，1.5 = 抗锯齿更好、更吃性能）
   audioBitrate: 128k  # 音频码率
   encoder: auto       # 视频编码器：auto | nvenc | amd | intel | libx264
                       # auto 自动探测硬件编码器（NVIDIA→AMD→Intel），全部失败回退 libx264

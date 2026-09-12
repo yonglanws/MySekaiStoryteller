@@ -47,7 +47,7 @@
         "modelId": 1,
         "from": { "side": "Right", "offset": 100 },
         "to": { "side": "Center", "offset": 0 },
-        "motion": "w-normal-default01",
+        "motion": "w-happy-wandahoi01",
         "facial": "face_smile_01",
         "facialFirst": true,
         "moveSpeed": "Normal"

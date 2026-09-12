@@ -35,8 +35,20 @@ export default class LayoutAppearSnippet extends BaseSnippet {
     const is_moved = from.x !== to.x || from.y !== to.y
     model.setPositionRel(this.app.stage_size, is_moved ? from : to)
 
-    // 淡入、滑入、入场动作三者并发：动作在滑动过程中持续播放，禁止站桩滑动
+    // 淡入、入场动作、滑入并发：动作先加载并启动（await 到"已开始播放"），
+    // 随后立即启动滑动——滑入全程动作在播，杜绝站桩滑动。
     const show_task = model.show(200, this.data.data.hologram)
+
+    let motions_started = false
+    if (this.data.data.motion || this.data.data.facial) {
+      await model.startMotions(
+        this.data.data.motion,
+        this.data.data.facial,
+        this.data.data.facialFirst
+      )
+      motions_started = true
+    }
+
     const move_task = is_moved
       ? model.move(
           this.app.stage_size,
@@ -45,21 +57,14 @@ export default class LayoutAppearSnippet extends BaseSnippet {
           StageUtils.move_speed_to_num(this.data.data.moveSpeed)
         )
       : null
-    const motion_task =
-      this.data.data.motion || this.data.data.facial
-        ? model.applyAndWait(
-            this.data.data.motion,
-            this.data.data.facial,
-            this.data.data.facialFirst
-          )
-        : null
 
     await show_task
     if (move_task) {
       await move_task
     }
-    if (motion_task) {
-      await motion_task
+    if (motions_started) {
+      // 入场动作播完再继续剧情：角色到位并完成动作后才开始说话（与原项目一致）
+      await model.waitForMotionsFinished()
     }
   }
 }

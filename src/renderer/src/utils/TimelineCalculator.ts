@@ -268,12 +268,18 @@ function crossValidate(
       selectedSource = pathA.source
       decisionReason = `PathA has data_duration(${pathA.durationMs}ms), using exact value`
     } else if (pathA.source === 'content_estimation') {
-      // 优化: 内容估算优先，但考虑delay值作为下限
-      // 如果delay合理（>200ms），取平均值；否则使用内容估算
-      if (pathB.durationMs >= 200 && pathB.durationMs < pathA.durationMs * 1.5) {
+      // 内容估算 = 打字机时长 + 阅读停留，是台词的完整预期时长。
+      // 只有剧本显式给了足够大的 delay（delay_fallback）才允许拉长；
+      // delay 过小时 pathB 是 600ms 的 emergency 兜底值，绝不能参与平均——
+      // 否则估算被稀释到低于打字机时间，句间停留会归零（对话背靠背）。
+      if (
+        pathB.source === 'delay_fallback' &&
+        pathB.durationMs >= 200 &&
+        pathB.durationMs < pathA.durationMs * 1.5
+      ) {
         finalDurationMs = Math.round((pathA.durationMs + pathB.durationMs) / 2)
         selectedSource = pathA.source
-        decisionReason = `PathA content(${pathA.durationMs}ms) averaged with delay(${pathB.durationMs}ms)`
+        decisionReason = `PathA content(${pathA.durationMs}ms) averaged with explicit delay(${pathB.durationMs}ms)`
       } else {
         finalDurationMs = pathA.durationMs
         selectedSource = pathA.source

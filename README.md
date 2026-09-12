@@ -14,9 +14,9 @@
 </div>
 
 > [!IMPORTANT]
-> 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 二次开发，
-> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**，用于在无桌面环境的 Linux 服务器上
-> 提供 Live2D 视频渲染服务。如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
+> 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) **二次开发**，
+> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**
+> 如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
 > [Untitled-Story](https://github.com/Untitled-Story) 组织。
 
 
@@ -230,7 +230,8 @@ docs/                 部署文档；deploy/ systemd 单元；scripts/ 测试与
 
 **Q: health 里 WebGL renderer 显示 SwiftShader / llvmpipe**
 
-WebGL 落到了软件渲染，导出会慢 5-10 倍。Linux + NVIDIA 下尝试
+WebGL 落到了软件渲染，导出会慢 5-10 倍，并且可能会遇到音画不同步等问题。
+Linux + NVIDIA 下尝试
 `MSS_CHROME_ARGS="--use-angle=gl"`，详见部署文档的参数调优章节。
 
 **Q: 视频导出失败或卡住**
@@ -252,6 +253,6 @@ WebGL 落到了软件渲染，导出会慢 5-10 倍。Linux + NVIDIA 下尝试
 
 ## 致谢
 
-- [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) — 本项目的基底，感谢原作者 [GuangChen2333](https://github.com/GuangChen2333)
+- [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) 
 - [Sekai-World/sekai-viewer](https://github.com/Sekai-World/sekai-viewer)
 - [lezzthanthree/SEKAI-Stories](https://github.com/lezzthanthree/SEKAI-Stories)

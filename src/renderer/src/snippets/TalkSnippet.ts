@@ -161,6 +161,22 @@ export default class TalkSnippet extends BaseSnippet {
     this.syllableIndex = 0
   }
 
+  /**
+   * 导出时台词的目标时长：时间轴给定值与"按字数下限"取较大者。
+   * 下限 = 打字机(80ms/字) + 800ms 阅读停留——TTS 未接入/失败时，
+   * 时间轴上游值可能偏小，此下限保证台词完整显示且句间有呼吸间隔。
+   */
+  private resolveExportTalkDurationMs(originalDelayMs: number): number {
+    const timelineMs =
+      this.app.lastSnippetActualDurationMs > 0
+        ? this.app.lastSnippetActualDurationMs
+        : originalDelayMs
+    const talkData = this.data as unknown as TalkData
+    const contentLength = talkData.data?.content?.length ?? 0
+    const charBasedMinMs = Math.max(contentLength * 80 + 800, 1200)
+    return Math.max(timelineMs, charBasedMinMs)
+  }
+
   protected async handleSnippet(): Promise<void> {
     const talkData = this.data as unknown as TalkData
     if (talkData.type !== 'Talk') return
@@ -219,10 +235,7 @@ export default class TalkSnippet extends BaseSnippet {
 
     if (isExporting && hasModel) {
       const model = this.app.getModelById(talkData.data.modelId)
-      const targetDurationMs =
-        this.app.lastSnippetActualDurationMs > 0
-          ? this.app.lastSnippetActualDurationMs
-          : originalDelayMs
+      const targetDurationMs = this.resolveExportTalkDurationMs(originalDelayMs)
 
       this.startMouthAnimation(model, targetDurationMs)
     }
@@ -233,10 +246,7 @@ export default class TalkSnippet extends BaseSnippet {
 
     if (isExporting) {
       const elapsedMs = performance.now() - snippetStartTime
-      const targetDurationMs =
-        this.app.lastSnippetActualDurationMs > 0
-          ? this.app.lastSnippetActualDurationMs
-          : originalDelayMs
+      const targetDurationMs = this.resolveExportTalkDurationMs(originalDelayMs)
 
       const remainingWait = targetDurationMs - elapsedMs
       if (remainingWait > 50) {

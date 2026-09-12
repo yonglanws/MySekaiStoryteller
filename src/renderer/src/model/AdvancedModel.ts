@@ -136,11 +136,11 @@ export default class AdvancedModel extends Live2DModel {
     }
   }
 
-  public async applyAndWait(
-    motion?: string,
-    facial?: string,
-    facialFirst?: boolean
-  ): Promise<void> {
+  /**
+   * 仅启动动作/表情：返回时动作文件已加载并开始播放（尚未播完）。
+   * 供"动作必须与移动同时进行"的场景先启动动作、再启动移动，杜绝滑入滑出时的站桩空窗。
+   */
+  public async startMotions(motion?: string, facial?: string, facialFirst?: boolean): Promise<void> {
     // 确保模型已完全加载
     if (!this.internalModel) {
       this.logger.warn('Model not fully loaded, waiting...')
@@ -148,9 +148,6 @@ export default class AdvancedModel extends Live2DModel {
     }
 
     const waits: Promise<void>[] = []
-    const motion_manager = this.internalModel.parallelMotionManager[0]
-    const facial_manager = this.internalModel.parallelMotionManager[1]
-
     if (motion) {
       waits.push(this.applyMotion(motion, facialFirst))
     }
@@ -161,6 +158,12 @@ export default class AdvancedModel extends Live2DModel {
     this.lastChangeBlinkTime = Date.now()
 
     await Promise.all(waits)
+  }
+
+  /** 等待当前身体动作与表情全部播完（导出模式 15s 超时兜底） */
+  public async waitForMotionsFinished(): Promise<void> {
+    const motion_manager = this.internalModel.parallelMotionManager[0]
+    const facial_manager = this.internalModel.parallelMotionManager[1]
 
     const isExport = AnimationManager.isExporting()
     const timeoutMs = isExport ? 15000 : 0
@@ -173,9 +176,7 @@ export default class AdvancedModel extends Live2DModel {
         () => {
           if (timedOut) return true
           if (performance.now() - startTime > timeoutMs) {
-            this.logger.warn(
-              `applyAndWait timed out after ${timeoutMs}ms, forcing continue. motion=${motion}, facial=${facial}`
-            )
+            this.logger.warn('waitForMotionsFinished timed out, forcing continue')
             timedOut = true
             try {
               motion_manager.stopAllMotions()
@@ -196,6 +197,15 @@ export default class AdvancedModel extends Live2DModel {
     }
 
     this.lastChangeBlinkTime = Date.now()
+  }
+
+  public async applyAndWait(
+    motion?: string,
+    facial?: string,
+    facialFirst?: boolean
+  ): Promise<void> {
+    await this.startMotions(motion, facial, facialFirst)
+    await this.waitForMotionsFinished()
   }
 
   public setPositionRel(stage_size: [number, number], position: PositionRel): void {

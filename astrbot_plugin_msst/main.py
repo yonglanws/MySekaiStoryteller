@@ -390,7 +390,7 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 
 **双人**（6步）：ChangeLayoutMode(Normal) → BlackOut → ChangeBackgroundImage → BlackIn → LayoutAppear(角色A, to:Left) → LayoutAppear(角色B, to:Right)
 
-> LayoutAppear **必须写 from 和 to 实现滑入登场**：from 与 to 同侧，from.offset 为同侧外侧（Left:-100 / Right:+100 / Center:0），to.offset 为 0。入场动作与滑入同时进行，角色滑入到位、动作播完后才开始对话，无需额外初始化 Motion。
+> LayoutAppear **必须写 from 和 to 实现滑入登场**：from 与 to 同侧，from.offset 为同侧外侧（Left:-100 / Right:+100 / Center:0），to.offset 为 0。入场动作与滑入同时进行，角色滑入到位、动作播完后才开始对话，无需额外初始化 Motion。**入场/退场动作必须选有明显肢体表现的动作（点头、开心、歪头等），禁止用 default 站姿类动作——站姿滑入等于站桩**。
 
 ## 对话规范（强制）
 

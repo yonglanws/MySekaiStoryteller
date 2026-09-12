@@ -23,21 +23,13 @@ export default class LayoutClearSnippet extends BaseSnippet {
     const is_moved = from.x !== to.x || from.y !== to.y
     const move_duration_ms = is_moved ? StageUtils.move_speed_to_num(this.data.data.moveSpeed) : 0
 
-    // 退场动作与滑出并发播放（不等待播完，模型离场后动作自然中断）
+    // 退场动作先加载并启动（滑出全程动作在播），淡出与滑出等长：角色边演边走边隐
     const exit_motion = this.data.data.motion
     const exit_facial = this.data.data.facial
-    if (exit_motion) {
-      model.applyMotion(exit_motion, true).catch((e) => {
-        this.logger.warn(`LayoutClear motion '${exit_motion}' failed`, e)
-      })
-    }
-    if (exit_facial) {
-      model.applyFacial(exit_facial).catch((e) => {
-        this.logger.warn(`LayoutClear facial '${exit_facial}' failed`, e)
-      })
+    if (exit_motion || exit_facial) {
+      await model.startMotions(exit_motion || undefined, exit_facial || undefined, true)
     }
 
-    // 淡出与滑出等长：角色边滑边隐，而不是瞬间消失
     const hide_duration_ms = is_moved ? Math.max(move_duration_ms, 400) : 300
     const hide_task = model.hide(hide_duration_ms)
 

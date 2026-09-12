@@ -486,6 +486,25 @@ export default class VideoExportManager {
                 preDecoded: false
               })
             }
+          } else {
+            // TTS 未接入或合成失败：按字数生成台词时长（打字机 + 阅读停留），保证句间呼吸
+            const timelineEntry = timeline[i]
+            const fallbackMs = estimateSnippetDuration(snippet)
+            if (timelineEntry && timelineEntry.durationMs < fallbackMs) {
+              const durationDelta = fallbackMs - timelineEntry.durationMs
+              timeline[i] = {
+                ...timelineEntry,
+                durationMs: fallbackMs,
+                endTimeMs: timelineEntry.startTimeMs + fallbackMs
+              }
+              for (let j = i + 1; j < timeline.length; j++) {
+                timeline[j] = {
+                  ...timeline[j],
+                  startTimeMs: (timeline[j]?.startTimeMs ?? 0) + durationDelta,
+                  endTimeMs: (timeline[j]?.endTimeMs ?? 0) + durationDelta
+                }
+              }
+            }
           }
         }
 
