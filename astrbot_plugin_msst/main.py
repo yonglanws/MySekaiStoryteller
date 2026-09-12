@@ -1251,8 +1251,9 @@ class MySekaiStorytellerPlugin(Star):
 
         if user_id not in self.chat_history:
             self.chat_history[user_id] = []
+        chat_role = self._catalog.view().chat_defaults()["short_name"]
         self.chat_history[user_id].append({"role": "用户", "content": user_msg})
-        self.chat_history[user_id].append({"role": "瑞希", "content": bot_content})
+        self.chat_history[user_id].append({"role": chat_role, "content": bot_content})
         # 只保留最近10条记录，防止过长
         if len(self.chat_history[user_id]) > 10:
             self.chat_history[user_id] = self.chat_history[user_id][-10:]
@@ -1423,11 +1424,12 @@ class MySekaiStorytellerPlugin(Star):
 
             if snippet_type == "Talk":
                 data = snippet.get("data", {})
-                data["speaker"] = self._to_str(data.get("speaker"), "晓山瑞希")
+                default_model = view.default_model()
+                data["speaker"] = self._to_str(data.get("speaker"), view.name_by_id(default_model.get("id")))
                 content = self._to_str(data.get("content"), "...")
                 content = content.replace("\\n", "\n")
                 data["content"] = content
-                data["modelId"] = self._to_number(data.get("modelId"), 1)
+                data["modelId"] = self._to_number(data.get("modelId"), default_model.get("id", 1))
                 data["voice"] = self._to_str(data.get("voice"), "")
                 snippet["data"] = data
 
