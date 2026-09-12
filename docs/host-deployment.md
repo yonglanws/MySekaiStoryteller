@@ -21,12 +21,12 @@ AstrBot 插件（`astrbot_plugin_msst/`）**零改动兼容**。
 
 ## 依赖
 
-| 组件 | 说明 |
-| --- | --- |
-| Node.js ≥ 20 | 推荐 22 LTS |
+| 组件                     | 说明                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js ≥ 20             | 推荐 22 LTS                                                                                                                                       |
 | Chrome / Edge / Chromium | 渲染工作进程。自动按 `render.browserChannels` 顺序探测（默认 msedge → chrome → chromium）；无系统浏览器时先执行 `npx playwright install chromium` |
-| ffmpeg | 编码器。优先 `MSS_FFMPEG_PATH`，其次 npm 包 `ffmpeg-static`（安装时自动下载），最后 PATH |
-| NVIDIA 驱动（服务器） | `nvidia-smi` 可用即可，**不需要 Xorg / Xvfb / 桌面环境** |
+| ffmpeg                   | 编码器。优先 `MSS_FFMPEG_PATH`，其次 npm 包 `ffmpeg-static`（安装时自动下载），最后 PATH                                                          |
+| NVIDIA 驱动（服务器）    | `nvidia-smi` 可用即可，**不需要 Xorg / Xvfb / 桌面环境**                                                                                          |
 
 ## 构建与启动
 
@@ -45,29 +45,29 @@ npm start                         # node out-host/host/main.js
 所有配置集中在仓库根的 `config.yaml`（从 `config.example.yaml` 复制，每个字段都有中文注释）。
 **`config.yaml` 不入库**，升级代码不会覆盖你的配置。
 
-| 节 | 内容 |
-| --- | --- |
-| `server` | 端口、监听地址 |
-| `video` | 分辨率、帧率、CRF、渲染超采样、音频码率、**编码器**（auto/nvenc/amf/intel/libx264） |
-| `render` | worker 数、页面回收周期、浏览器探测顺序、附加 Chrome 参数、Linux GPU 开关 |
-| `paths` | 输出目录（apifile）、资源根（resources）、webrenderer 产物目录 |
-| `tts` | GPT-SoVITS 地址、启停、全局/角色参考音频与权重 |
-| `bgm` | 启停、BGM 路径（相对资源根，如 `audio/bgm/bg1.mp3`）、音量 |
+| 节       | 内容                                                                                |
+| -------- | ----------------------------------------------------------------------------------- |
+| `server` | 端口、监听地址                                                                      |
+| `video`  | 分辨率、帧率、CRF、渲染超采样、音频码率、**编码器**（auto/nvenc/amf/intel/libx264） |
+| `render` | worker 数、页面回收周期、浏览器探测顺序、附加 Chrome 参数、Linux GPU 开关           |
+| `paths`  | 输出目录（apifile）、资源根（resources）、webrenderer 产物目录                      |
+| `tts`    | GPT-SoVITS 地址、启停、全局/角色参考音频与权重                                      |
+| `bgm`    | 启停、BGM 路径（相对资源根，如 `audio/bgm/bg1.mp3`）、音量                          |
 
 环境变量可覆盖同名配置（适合 systemd/容器注入），见下表。
 
 ### 环境变量
 
-| 变量 | 覆盖的配置 | 说明 |
-| --- | --- | --- |
-| `MSS_PORT` / `MSS_HOST` | `server.port` / `server.host` | 监听 |
-| `MSS_VIDEO_WIDTH` / `MSS_VIDEO_HEIGHT` / `MSS_VIDEO_FPS` / `MSS_VIDEO_CRF` | `video.*` | 输出参数 |
-| `MSS_FFMPEG_ENCODER` | `video.encoder` | auto/nvenc/amf/intel/libx264 |
-| `MSS_WORKERS` / `MSS_WORKER_RECYCLE_EXPORTS` | `render.*` | 渲染池 |
-| `MSS_BROWSER_CHANNELS` / `MSS_BROWSER_EXECUTABLE` / `MSS_CHROME_ARGS` / `MSS_LINUX_GPU_ANGLE` | `render.*` | 浏览器 |
-| `MSS_OUTPUT_DIR` / `MSS_RESOURCE_DIR` / `MSS_WEB_RENDERER_DIR` | `paths.*` | 路径 |
-| `MSS_FFMPEG_PATH` | （独立） | 显式指定 ffmpeg 可执行文件 |
-| `MSS_LOG_LEVEL` | `logLevel` | silly/trace/debug/info/warn/error/fatal |
+| 变量                                                                                          | 覆盖的配置                    | 说明                                    |
+| --------------------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------- |
+| `MSS_PORT` / `MSS_HOST`                                                                       | `server.port` / `server.host` | 监听                                    |
+| `MSS_VIDEO_WIDTH` / `MSS_VIDEO_HEIGHT` / `MSS_VIDEO_FPS` / `MSS_VIDEO_CRF`                    | `video.*`                     | 输出参数                                |
+| `MSS_FFMPEG_ENCODER`                                                                          | `video.encoder`               | auto/nvenc/amf/intel/libx264            |
+| `MSS_WORKERS` / `MSS_WORKER_RECYCLE_EXPORTS`                                                  | `render.*`                    | 渲染池                                  |
+| `MSS_BROWSER_CHANNELS` / `MSS_BROWSER_EXECUTABLE` / `MSS_CHROME_ARGS` / `MSS_LINUX_GPU_ANGLE` | `render.*`                    | 浏览器                                  |
+| `MSS_OUTPUT_DIR` / `MSS_RESOURCE_DIR` / `MSS_WEB_RENDERER_DIR`                                | `paths.*`                     | 路径                                    |
+| `MSS_FFMPEG_PATH`                                                                             | （独立）                      | 显式指定 ffmpeg 可执行文件              |
+| `MSS_LOG_LEVEL`                                                                               | `logLevel`                    | silly/trace/debug/info/warn/error/fatal |
 
 启动后自检：
 
