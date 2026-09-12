@@ -45,19 +45,13 @@
       "delay": 0,
       "data": {
         "modelId": 1,
-        "from": { "side": "Right", "offset": 0 },
+        "from": { "side": "Right", "offset": 100 },
         "to": { "side": "Center", "offset": 0 },
         "motion": "w-normal-default01",
         "facial": "face_smile_01",
         "facialFirst": true,
         "moveSpeed": "Normal"
       }
-    },
-    {
-      "type": "Motion",
-      "wait": true,
-      "delay": 0,
-      "data": { "modelId": 1, "motion": "w-happy-glad01", "facial": "face_smile_01", "facialFirst": true }
     },
     {
       "type": "Talk",
@@ -108,10 +102,28 @@
       }
     },
     {
-      "type": "Motion",
+      "type": "HideTalk",
+      "wait": true,
+      "delay": 0.2
+    },
+    {
+      "type": "LayoutClear",
+      "wait": true,
+      "delay": 0.1,
+      "data": {
+        "modelId": 1,
+        "from": { "side": "Center", "offset": 0 },
+        "to": { "side": "Right", "offset": 100 },
+        "motion": "w-normal-default01",
+        "facial": "face_smile_01",
+        "moveSpeed": "Normal"
+      }
+    },
+    {
+      "type": "BlackOut",
       "wait": true,
       "delay": 0,
-      "data": { "modelId": 1, "motion": "w-normal-default01", "facial": "face_smile_01", "facialFirst": true }
+      "data": { "duration": 600 }
     }
   ]
 }

@@ -94,7 +94,11 @@ const SnippetSchema = z.discriminatedUnion('type', [
         side: SideEnum,
         offset: z.number().default(0)
       }),
-      moveSpeed: MoveSpeedEnum
+      moveSpeed: MoveSpeedEnum,
+      /** 退场时的并发身体动作（与滑出同时进行，模型离场后自然中断） */
+      motion: z.string().default(''),
+      /** 退场时的并发表情（可选） */
+      facial: z.string().default('')
     })
   }),
   z.object({

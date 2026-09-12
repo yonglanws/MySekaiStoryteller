@@ -65,7 +65,7 @@ export interface TTSMapping {
   audioPath?: string
 }
 
-const TTS_PADDING_MS = 30
+const TTS_PADDING_MS = 300
 const CHAR_READ_SPEED_MS = 80
 const CHAR_TELOP_SPEED_MS = 90
 const MIN_DURATION_MS = 500

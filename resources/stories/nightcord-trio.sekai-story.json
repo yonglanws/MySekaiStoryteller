@@ -12,9 +12,9 @@
     { "type": "BlackOut", "wait": true, "delay": 0, "data": { "duration": 500 } },
     { "type": "ChangeBackgroundImage", "wait": true, "delay": 0, "data": { "imageId": 1 } },
     { "type": "BlackIn", "wait": true, "delay": 0, "data": { "duration": 800 } },
-    { "type": "LayoutAppear", "wait": true, "delay": 0, "data": { "modelId": 3, "from": { "side": "Center", "offset": 0 }, "to": { "side": "Center", "offset": 0 }, "motion": "w-normal-default01", "facial": "face_normal_01", "facialFirst": true, "moveSpeed": "Normal" } },
+    { "type": "LayoutAppear", "wait": true, "delay": 0, "data": { "modelId": 3, "from": { "side": "Center", "offset": -100 }, "to": { "side": "Center", "offset": 0 }, "motion": "w-normal-default01", "facial": "face_normal_01", "facialFirst": true, "moveSpeed": "Normal" } },
     { "type": "Talk", "wait": false, "delay": 0, "data": { "speaker": "奏", "content": "新曲的草稿传上去了……\n大家有空听听看吧。", "ttsText": "新曲のラフをアップしたよ……\n暇があったら聴いてみて。", "modelId": 3, "voice": "", "motion": "w-kanade-nod01", "facial": "face_normal_01" } },
-    { "type": "LayoutAppear", "wait": true, "delay": 0, "data": { "modelId": 1, "from": { "side": "Left", "offset": 100 }, "to": { "side": "Left", "offset": 0 }, "motion": "w-happy-glad01", "facial": "face_smile_01", "facialFirst": true, "moveSpeed": "Normal" } },
+    { "type": "LayoutAppear", "wait": true, "delay": 0, "data": { "modelId": 1, "from": { "side": "Left", "offset": -100 }, "to": { "side": "Left", "offset": 0 }, "motion": "w-happy-glad01", "facial": "face_smile_01", "facialFirst": true, "moveSpeed": "Normal" } },
     { "type": "Talk", "wait": false, "delay": 0.1, "data": { "speaker": "瑞希", "content": "来了来了！刚看到通知～\n我可是第一时间冲进来的哦。", "ttsText": "来た来た！通知を見て即駆けつけたよ〜。", "modelId": 1, "voice": "", "motion": "w-happy-glad01", "facial": "face_smile_01" } },
     { "type": "Talk", "wait": false, "delay": 0, "data": { "speaker": "奏", "content": "嗯……不过前奏，\n可能还是太安静了一点。", "ttsText": "うん……でも前奏は、まだ静かすぎるかな。", "modelId": 3, "voice": "", "motion": "w-kanade-lookdown01", "facial": "face_sad_01" } },
     { "type": "Motion", "wait": false, "delay": 0.1, "data": { "modelId": 1, "motion": "w-normal-nod01", "facial": "face_smile_01", "facialFirst": false } },
@@ -33,6 +33,10 @@
     { "type": "Motion", "wait": false, "delay": 0.1, "data": { "modelId": 1, "motion": "w-happy-nod01", "facial": "face_smile_01", "facialFirst": false } },
     { "type": "Talk", "wait": false, "delay": 0, "data": { "speaker": "奏", "content": "《留白》……嗯，就它了。\n谢谢你们。", "ttsText": "『余白』……うん、それにする。\nありがとう。", "modelId": 3, "voice": "", "motion": "w-normal-nod01", "facial": "face_smile_01" } },
     { "type": "Talk", "wait": false, "delay": 0.1, "data": { "speaker": "瑞希", "content": "那今晚我就把封面画出来～\n明天让你们大吃一惊！", "ttsText": "今夜中に表紙描いちゃう〜\n明日、びっくりさせてあげる！", "modelId": 1, "voice": "", "motion": "w-happy-glad01", "facial": "face_smile_01" } },
+    { "type": "HideTalk", "wait": true, "delay": 0.2 },
+    { "type": "LayoutClear", "wait": true, "delay": 0.1, "data": { "modelId": 1, "from": { "side": "Left", "offset": 0 }, "to": { "side": "Left", "offset": -100 }, "motion": "w-normal-default01", "facial": "face_smile_01", "moveSpeed": "Normal" } },
+    { "type": "LayoutClear", "wait": true, "delay": 0.1, "data": { "modelId": 2, "from": { "side": "Right", "offset": 0 }, "to": { "side": "Right", "offset": 100 }, "motion": "w-normal-nod01", "facial": "face_smile_02", "moveSpeed": "Normal" } },
+    { "type": "LayoutClear", "wait": true, "delay": 0.1, "data": { "modelId": 3, "from": { "side": "Center", "offset": 0 }, "to": { "side": "Center", "offset": 100 }, "motion": "w-normal-nod01", "facial": "face_smile_01", "moveSpeed": "Normal" } },
     { "type": "BlackOut", "wait": true, "delay": 0, "data": { "duration": 600 } }
   ]
 }

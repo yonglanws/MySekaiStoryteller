@@ -146,6 +146,10 @@ async def run(base_url: str) -> int:
     check("剧本 prompt 含场景", "深夜在Nightcord" in user_prompt)
     check("剧本 prompt 无旧版四段式路径", "19ena_normal_3.0_f_t05/19ena_normal" not in user_prompt)
     check("剧本 prompt 示例含 Talk 并发动作", '"motion":"w-happy-nod01"' in user_prompt and "说话者边说边做" in user_prompt)
+    check("剧本 prompt 含退场序列规则", "退场序列" in user_prompt and '"type":"LayoutClear"' in user_prompt)
+    check("剧本 prompt 示例退场带动作滑出", '"to":{"side":"Left","offset":-100},"motion"' in user_prompt)
+    check("剧本 prompt 要求滑入登场", "必须写 from" in user_prompt)
+    check("剧本 prompt 已删除无退场旧规则", "无退场序列" not in user_prompt)
 
     # --- 聊天模式 ---
     _, chat_prompt = s._build_chat_prompt("你好呀", "test-user")
@@ -156,6 +160,8 @@ async def run(base_url: str) -> int:
     check("聊天 prompt 无简写路径 bug", '"model":"20mizuki_normal"' not in chat_prompt)
     check("聊天 prompt 含默认角色", chat_defaults["name"] in chat_prompt)
     check("聊天 prompt 含场景", "你好呀" in chat_prompt)
+    check("聊天 prompt 含退场序列", "HideTalk" in chat_prompt and '"type": "LayoutClear"' in chat_prompt)
+    check("聊天 prompt 入场为滑入写法", '"from": {"side": "Right", "offset": 100}' in chat_prompt)
 
     print("\n" + ("ALL PROMPT BUILD TESTS PASSED" if not fails else f"{len(fails)} FAILED"))
     return 1 if fails else 0

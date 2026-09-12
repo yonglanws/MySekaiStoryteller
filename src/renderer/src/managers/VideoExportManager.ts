@@ -35,6 +35,9 @@ export interface ExportProgress {
 type ProgressCallback = (progress: ExportProgress) => void
 type InternalProgressCallback = (progress: ExtendedExportProgress) => void
 
+/** 台词音频结束后的静音尾垫：保证相邻对话之间有呼吸间隔 */
+const TTS_TAIL_SILENCE_MS = 600
+
 export default class VideoExportManager {
   private readonly logger: ExportLogger
   private readonly checkpointManager: CheckpointManager
@@ -452,7 +455,7 @@ export default class VideoExportManager {
           if (ttsResult && ttsResult.success && ttsResult.duration > 0) {
             const timelineEntry = timeline[i]
             const oldDurationMs = timelineEntry?.durationMs ?? 0
-            const newDurationMs = Math.max(oldDurationMs, ttsResult.duration + 200)
+            const newDurationMs = Math.max(oldDurationMs, ttsResult.duration + TTS_TAIL_SILENCE_MS)
             const durationDelta = newDurationMs - oldDurationMs
 
             timeline[i] = {

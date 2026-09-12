@@ -164,7 +164,9 @@ SNIPPET_SCHEMAS = {
                             "offset": {"type": "number", "default": 0}
                         }
                     },
-                    "moveSpeed": {"type": "string", "enum": ["Slow", "Normal", "Fast", "Immediate"]}
+                    "moveSpeed": {"type": "string", "enum": ["Slow", "Normal", "Fast", "Immediate"]},
+                    "motion": {"type": "string"},
+                    "facial": {"type": "string"}
                 }
             }
         }
@@ -384,11 +386,11 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 
 ## 开场序列
 
-**单人**（6步）：ChangeLayoutMode(Normal) → BlackOut → ChangeBackgroundImage → BlackIn → LayoutAppear(角色A) → Motion(角色A, wait:true)
+**单人**（5步）：ChangeLayoutMode(Normal) → BlackOut → ChangeBackgroundImage → BlackIn → LayoutAppear(角色A)
 
-**双人**（7步）：ChangeLayoutMode(Normal) → BlackOut → ChangeBackgroundImage → BlackIn → LayoutAppear(角色A, to:Left) → LayoutAppear(角色B, to:Right) → Motion(先说话角色, wait:true)
+**双人**（6步）：ChangeLayoutMode(Normal) → BlackOut → ChangeBackgroundImage → BlackIn → LayoutAppear(角色A, to:Left) → LayoutAppear(角色B, to:Right)
 
-> LayoutAppear中的motion/facial即是初始姿态，无需额外初始化Motion。
+> LayoutAppear **必须写 from 和 to 实现滑入登场**：from 与 to 同侧，from.offset 为同侧外侧（Left:-100 / Right:+100 / Center:0），to.offset 为 0。入场动作与滑入同时进行，角色滑入到位、动作播完后才开始对话，无需额外初始化 Motion。
 
 ## 对话规范（强制）
 
@@ -396,7 +398,16 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 - **Talk.modelId 必须与 speaker 严格对应**：{id_mapping}
 - **说话者边说边做**：每条 Talk 的 data 里必须带 motion（身体动作，匹配台词语气）和 facial（表情）；动作与说话同时进行，禁止为说话者单独添加 Motion 片段
 - **非说话角色的反应**才用独立 Motion(wait:false) 片段，插在对方 Talk 之间
+- **台词之间要有呼吸间隔**：换人说话时下一条 Talk 的 delay 取 0.1~0.2；同一人连续说话时第二条 Talk 的 delay 取 0.15~0.2
 - 每个Talk含content（中文，最多3行含\n）和ttsText（日文翻译）
+
+## 退场序列（强制）
+
+剧情结束（或场景切换）时，在场角色**必须依次带动画退场**，禁止无动画消失或站到黑屏：
+
+1. HideTalk（wait:true, delay 0.2）
+2. 每个在场角色一条 LayoutClear（wait:true, delay 0.1）：from 为角色当前位置（同侧 offset 0），to 为**同侧外侧**（Left:-100 / Right:+100 / Center:100），moveSpeed 为 Normal，motion/facial 填该角色的退场动作与表情
+3. BlackOut（duration 500~800）收尾
 
 ## 输出JSON骨架（必须严格遵循此结构）
 
@@ -420,7 +431,11 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
     {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"瑞希","content":"今天天气真好呢～\n要不要出去走走？","ttsText":"今日はいい天気だね～\nお散歩でも行かない？","modelId":1,"voice":"1","motion":"w-happy-nod01","facial":"face_smile_01"}},
     {"type":"Motion","wait":false,"delay":0.1,"data":{"modelId":2,"motion":"w-normal-nod01","facial":"face_smile_02","facialFirst":false}},
     {"type":"Talk","wait":false,"delay":0,"data":{"speaker":"绘名","content":"嗯，正好我也想出去透透气。","ttsText":"うん、ちょうど外の空気を吸いたいと思ってた。","modelId":2,"voice":"1","motion":"w-cool-tilthead01","facial":"face_normal_01"}},
-    {"type":"Motion","wait":false,"delay":0.15,"data":{"modelId":1,"motion":"w-cute-glad01","facial":"face_sparkling_01","facialFirst":false}}
+    {"type":"Motion","wait":false,"delay":0.15,"data":{"modelId":1,"motion":"w-cute-glad01","facial":"face_sparkling_01","facialFirst":false}},
+    {"type":"HideTalk","wait":true,"delay":0.2},
+    {"type":"LayoutClear","wait":true,"delay":0.1,"data":{"modelId":1,"from":{"side":"Left","offset":0},"to":{"side":"Left","offset":-100},"motion":"w-normal-default01","facial":"face_smile_01","moveSpeed":"Normal"}},
+    {"type":"LayoutClear","wait":true,"delay":0.1,"data":{"modelId":2,"from":{"side":"Right","offset":0},"to":{"side":"Right","offset":100},"motion":"w-normal-nod01","facial":"face_normal_01","moveSpeed":"Normal"}},
+    {"type":"BlackOut","wait":true,"delay":0,"data":{"duration":600}}
   ]
 }
 ```
@@ -444,12 +459,12 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 ## 输出要求
 1. **输出必须是合法JSON对象，包含且仅包含 models、images、snippets 三个顶级字段，无额外文字**
 2. 单人7-10条对话；双人每角色3-5句交替
-3. 包含完整开场序列（单人6步/双人7步）
-4. LayoutAppear的motion/facial即初始姿态
+3. 包含完整开场序列（单人5步/双人6步）
+4. LayoutAppear 必须写 from（同侧外侧 ∓100）和 to（同侧 offset 0）实现滑入，motion/facial 即入场动作
 5. **双人场景中，检查所有LayoutAppear的to.side：角色A必须是Left，角色B必须是Right，禁止Center**
-6. **检查所有Talk/Motion/LayoutAppear的modelId：{id_mapping}**
+6. **检查所有Talk/Motion/LayoutAppear/LayoutClear的modelId：{id_mapping}**
 7. **检查models数组：每个角色的model路径必须与对照表一致，绝不能全部写成同一个模型**
-8. 无退场序列，无Telop
+8. **结尾必须有退场序列**（HideTalk → 每个在场角色 LayoutClear 带动作滑出 → BlackOut 收尾），不使用 Telop
 9. delay用0、0.05、0.1、0.15、0.2
 10. 每个Talk含content（中文，最多3行）、ttsText（日文翻译），以及motion和facial（说话时的并发动作与表情，必须来自该角色的可用清单）
 11. **说话者的动作写在Talk的motion字段（边说边做）**；独立Motion片段只用于非说话角色的反应
@@ -559,40 +574,39 @@ CHAT_MODE_PROMPT_TEMPLATE = r"""# {chat_name}（{chat_en_name}）聊天模式
 
 > 说话者的动作直接写在 Talk 的 motion/facial 字段里（与说话同时进行）；独立的 Motion 片段只用于句间的附加反应。
 
-### 聊天模式的snippets结构（简化版开场，无退场动画）
-聊天模式需要完整的开场来显示背景和角色，但不需要退场动画：
+### 聊天模式的snippets结构（开场滑入 + 结尾退场）
+聊天模式需要完整的开场来显示背景和角色滑入登场，结尾角色必须带动画退场：
 ```
-ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear -> [Motion(wait:true) + Talk + Motion(wait:false)] 重复5-8次
+ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear -> [Talk(+ Motion(wait:false) 反应)] 重复5-8次 -> HideTalk -> LayoutClear -> BlackOut
 ```
 
-**LayoutAppear中的motion和facial即初始姿态，角色会保持在该动作的最后一帧，无需额外初始化Motion。**
+**LayoutAppear 必须写 from 和 to 实现滑入登场**：from 为 {"side":"Right","offset":100}（同侧外侧），to 为 {"side":"Center","offset":0}；motion/facial 即入场动作，角色滑入到位、动作播完后才开始对话。
 
-**正确的开场序列必须包含以下6个snippet：**
-1. ChangeLayoutMode - 初始化布局
-2. BlackOut - 黑屏过渡
-3. ChangeBackgroundImage - 切换背景
-4. BlackIn - 淡入
-5. LayoutAppear - 角色入场（motion/facial即初始姿态）
-6. Motion - 第一个对话前的动作（wait: true）
+**结尾退场序列（3个snippet，缺一不可）：**
+1. HideTalk（wait: true, delay 0.2）
+2. LayoutClear（wait: true, delay 0.1）：from 为 {"side":"Center","offset":0}，to 为 {"side":"Right","offset":100}，moveSpeed 为 Normal，motion/facial 填退场动作与表情
+3. BlackOut（wait: true, duration 600）
 
 示例：
-{"type": "ChangeLayoutMode", "wait": false, "delay": 0, "data": {"mode": 0}},
+{"type": "ChangeLayoutMode", "wait": false, "delay": 0, "data": {"mode": "Normal"}},
 {"type": "BlackOut", "wait": true, "delay": 0, "data": {"duration": 500}},
-{"type": "ChangeBackgroundImage", "wait": true, "delay": 0, "data": {"image": {"id": 1}}},
+{"type": "ChangeBackgroundImage", "wait": true, "delay": 0, "data": {"imageId": 1}},
 {"type": "BlackIn", "wait": true, "delay": 0, "data": {"duration": 800}},
-{"type": "LayoutAppear", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "from": {"side": "Right", "offset": 0}, "to": {"side": "Center", "offset": 0}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true, "moveSpeed": "Normal"}},
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "facialFirst": true}},
+{"type": "LayoutAppear", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "from": {"side": "Right", "offset": 100}, "to": {"side": "Center", "offset": 0}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true, "moveSpeed": "Normal"}},
 {"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "你好呀！", "ttsText": "やっほー！", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_motion_b}", "facial": "{chat_facial_b}"}},
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_c}", "facial": "{chat_facial_d}", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_default_motion}", "facial": "{chat_facial_c}"}}
+{"type": "Motion", "wait": false, "delay": 0.1, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_c}", "facial": "{chat_facial_d}", "facialFirst": true}},
+{"type": "Talk", "wait": false, "delay": 0.15, "data": {"speaker": "{chat_short_name}", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": {chat_model_id}, "voice": "1", "motion": "{chat_default_motion}", "facial": "{chat_facial_c}"}},
+{"type": "HideTalk", "wait": true, "delay": 0.2},
+{"type": "LayoutClear", "wait": true, "delay": 0.1, "data": {"modelId": {chat_model_id}, "from": {"side": "Center", "offset": 0}, "to": {"side": "Right", "offset": 100}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "moveSpeed": "Normal"}},
+{"type": "BlackOut", "wait": true, "delay": 0, "data": {"duration": 600}}
 
 ## 输出要求
 1. 合法JSON，无额外文字
 2. 5-8条对话，content中文可多说一些，但最多3个换行，ttsText日文翻译
-3. 必须包含开场序列：ChangeLayoutMode+BlackOut+ChangeBackgroundImage+BlackIn+LayoutAppear+Motion(对话前)
-4. LayoutAppear中的motion和facial就是初始姿态，不需要额外的初始化Motion
-5. 无退场序列，无Telop
-6. delay用0、0.05、0.1、0.15、0.2
+3. 必须包含开场序列：ChangeLayoutMode+BlackOut+ChangeBackgroundImage+BlackIn+LayoutAppear（带 from/to 滑入）
+4. LayoutAppear的motion和facial就是入场动作，不需要额外的初始化Motion
+5. **结尾必须有退场序列**（HideTalk → LayoutClear 带动作滑出 → BlackOut），不使用 Telop
+6. delay用0、0.05、0.1、0.15、0.2；换气的 Talk 之间 delay 取 0.1~0.2
 7. speaker="{chat_name}"，modelId={chat_model_id}，voice="1"；每条 Talk 必须带 motion（说话时的并发动作）和 facial（表情）
 8. models=[{"id":{chat_model_id},"model":"{chat_model_path}","normal_scale":2.1,"small_scale":1.8,"anchor":0.5}]
 9. images=[{"id":1,"image":"{chat_image}"}]
@@ -1456,43 +1470,62 @@ class MySekaiStorytellerPlugin(Star):
                 if data["moveSpeed"] not in self.VALID_MOVE_SPEEDS:
                     data["moveSpeed"] = "Normal"
                 data["hologram"] = self._to_bool(data.get("hologram"), False)
-                if "from" not in data or not isinstance(data.get("from"), dict):
-                    data["from"] = {"side": "Left", "offset": 0}
                 if "to" not in data or not isinstance(data.get("to"), dict):
-                    data["to"] = {"side": "Center", "offset": 0}
-                data["from"]["side"] = self._to_str(data["from"].get("side"), "Left")
-                if data["from"]["side"] not in self.VALID_SIDES:
-                    data["from"]["side"] = "Left"
-                data["from"]["offset"] = self._to_number(data["from"].get("offset"), 0)
-                # 如果 from.side 是 Left/Right 且 to.side 缺失或为 Center，默认沿用 from.side
-                to_side = data["to"].get("side")
-                from_side = data["from"]["side"]
-                if not to_side or (to_side == "Center" and from_side in ("Left", "Right")):
-                    to_side = from_side
-                data["to"]["side"] = self._to_str(to_side, "Center")
+                    data["to"] = {"side": "Left", "offset": 0}
+                data["to"]["side"] = self._to_str(data["to"].get("side"), "Left")
                 if data["to"]["side"] not in self.VALID_SIDES:
-                    data["to"]["side"] = "Center"
+                    data["to"]["side"] = "Left"
                 data["to"]["offset"] = self._to_number(data["to"].get("offset"), 0)
+                # 入场必须滑入：from 缺失时按 to.side 推导同侧外侧起点（动作与滑入并发）
+                entrance_offset = {"Left": -100, "Right": 100, "Center": 0}.get(
+                    data["to"]["side"], 0
+                )
+                if "from" not in data or not isinstance(data.get("from"), dict):
+                    data["from"] = {"side": data["to"]["side"], "offset": entrance_offset}
+                data["from"]["side"] = self._to_str(data["from"].get("side"), data["to"]["side"])
+                if data["from"]["side"] not in self.VALID_SIDES:
+                    data["from"]["side"] = data["to"]["side"]
+                data["from"]["offset"] = self._to_number(data["from"].get("offset"), entrance_offset)
                 snippet["data"] = data
 
             elif snippet_type == "LayoutClear":
                 data = snippet.get("data", {})
                 data["modelId"] = self._to_number(data.get("modelId"), 1)
+                model_id = data["modelId"]
                 data["moveSpeed"] = self._to_str(data.get("moveSpeed"), "Normal")
                 if data["moveSpeed"] not in self.VALID_MOVE_SPEEDS:
                     data["moveSpeed"] = "Normal"
                 if "from" not in data or not isinstance(data.get("from"), dict):
                     data["from"] = {"side": "Center", "offset": 0}
-                if "to" not in data or not isinstance(data.get("to"), dict):
-                    data["to"] = {"side": "Right", "offset": 0}
                 data["from"]["side"] = self._to_str(data["from"].get("side"), "Center")
                 if data["from"]["side"] not in self.VALID_SIDES:
                     data["from"]["side"] = "Center"
                 data["from"]["offset"] = self._to_number(data["from"].get("offset"), 0)
-                data["to"]["side"] = self._to_str(data["to"].get("side"), "Right")
+                # 退场必须滑出：to 缺失时按 from.side 推导同侧外侧终点
+                exit_offset = {"Left": -100, "Right": 100, "Center": 100}.get(
+                    data["from"]["side"], 100
+                )
+                if "to" not in data or not isinstance(data.get("to"), dict):
+                    data["to"] = {"side": data["from"]["side"], "offset": exit_offset}
+                data["to"]["side"] = self._to_str(data["to"].get("side"), data["from"]["side"])
                 if data["to"]["side"] not in self.VALID_SIDES:
-                    data["to"]["side"] = "Right"
-                data["to"]["offset"] = self._to_number(data["to"].get("offset"), 0)
+                    data["to"]["side"] = data["from"]["side"]
+                data["to"]["offset"] = self._to_number(data["to"].get("offset"), exit_offset)
+                # 退场动作/表情：非法值回退该角色默认（退场必须有动作，禁止无动画消失）
+                clear_motion = self._clean_path(self._to_str(data.get("motion"), ""))
+                if not clear_motion:
+                    clear_motion = view.default_motion(model_id)
+                elif clear_motion not in view.valid_motions(model_id):
+                    logger.warning(f"LayoutClear motion '{clear_motion}' not available for {view.name_by_id(model_id)}, falling back to {view.default_motion(model_id)}")
+                    clear_motion = view.default_motion(model_id)
+                data["motion"] = clear_motion
+                clear_facial = self._clean_path(self._to_str(data.get("facial"), ""))
+                if not clear_facial:
+                    clear_facial = view.default_facial(model_id)
+                elif clear_facial not in view.valid_facials(model_id):
+                    logger.warning(f"LayoutClear facial '{clear_facial}' not available for {view.name_by_id(model_id)}, falling back to {view.default_facial(model_id)}")
+                    clear_facial = view.default_facial(model_id)
+                data["facial"] = clear_facial
                 snippet["data"] = data
 
             elif snippet_type == "Motion":

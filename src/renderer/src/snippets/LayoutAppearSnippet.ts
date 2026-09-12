@@ -9,12 +9,9 @@ export default class LayoutAppearSnippet extends BaseSnippet {
 
     const model = this.app.getModelById(this.data.data.modelId)
 
-    // 在添加模型到舞台前，先获取内部模型的引用，准备阻止idle
-    if (model.internalModel) {
-      // 在添加前先停止所有动作！
-      model.internalModel?.parallelMotionManager[0]?.stopAllMotions()
-      model.internalModel?.parallelMotionManager[1]?.stopAllMotions()
-    }
+    // 阻止 idle 动作干扰入场表演
+    model.internalModel?.parallelMotionManager[0]?.stopAllMotions()
+    model.internalModel?.parallelMotionManager[1]?.stopAllMotions()
 
     this.app.layerModel.addModelToLayer(model)
 
@@ -22,22 +19,6 @@ export default class LayoutAppearSnippet extends BaseSnippet {
     if (!model.internalModel) {
       this.logger.warn('Model internalModel not ready, waiting...')
       await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-
-    // 再次停止所有动作（再次确保idle被阻止）
-    model.internalModel?.parallelMotionManager[0]?.stopAllMotions()
-    model.internalModel?.parallelMotionManager[1]?.stopAllMotions()
-
-    // 立即应用初始motion和facial（如果有），在show之前就设置好姿态
-    if (this.data.data.motion || this.data.data.facial) {
-      await model.applyAndWait(
-        this.data.data.motion,
-        this.data.data.facial,
-        this.data.data.facialFirst
-      )
-
-      // 强制再播放一次最后一帧，确保姿态完全正确
-      await model.playMotionLastFrame(this.data.data.motion, this.data.data.facial)
     }
 
     const from: PositionRel = StageUtils.side_to_position(
@@ -51,38 +32,34 @@ export default class LayoutAppearSnippet extends BaseSnippet {
       this.data.data.to.offset
     )
 
-    const show_task = model.show(200, this.data.data.hologram)
-
     const is_moved = from.x !== to.x || from.y !== to.y
+    model.setPositionRel(this.app.stage_size, is_moved ? from : to)
 
-    if (is_moved) {
-      // 有位移：先把模型放到滑入起点，再由 move() 插值到终点
-      model.setPositionRel(this.app.stage_size, from)
-    } else {
-      // 无位移登场（from == to）：直接落位到目标点。
-      // 此前缺少这一步，原地登场的模型停留在默认坐标 (0,0) 而出画。
-      model.setPositionRel(this.app.stage_size, to)
-    }
-
-    // 开始平移时立即阻止idle，确保平移过程中也是正确姿态
-    if (is_moved) {
-      model.internalModel?.parallelMotionManager[0]?.stopAllMotions()
-      model.internalModel?.parallelMotionManager[1]?.stopAllMotions()
-    }
-
-    const move_task = !is_moved
-      ? null
-      : model.move(
+    // 淡入、滑入、入场动作三者并发：动作在滑动过程中持续播放，禁止站桩滑动
+    const show_task = model.show(200, this.data.data.hologram)
+    const move_task = is_moved
+      ? model.move(
           this.app.stage_size,
           from,
           to,
           StageUtils.move_speed_to_num(this.data.data.moveSpeed)
         )
+      : null
+    const motion_task =
+      this.data.data.motion || this.data.data.facial
+        ? model.applyAndWait(
+            this.data.data.motion,
+            this.data.data.facial,
+            this.data.data.facialFirst
+          )
+        : null
 
-    // 等待show和move完成
     await show_task
     if (move_task) {
       await move_task
+    }
+    if (motion_task) {
+      await motion_task
     }
   }
 }

@@ -9,9 +9,6 @@ export default class LayoutClearSnippet extends BaseSnippet {
 
     const model = this.app.getModelById(this.data.data.modelId)
 
-    let move_task: Promise<void> | null = null
-    const hide_task = model.hide(50)
-
     const from: PositionRel = StageUtils.side_to_position(
       this.data.data.from.side,
       this.app.layerModel.layoutMode,
@@ -23,20 +20,37 @@ export default class LayoutClearSnippet extends BaseSnippet {
       this.data.data.to.offset
     )
 
-    if (from.x === to.x && from.y === to.y) {
-      model.setPositionRel(this.app.stage_size, to)
-    } else {
-      move_task = model.move(
-        this.app.stage_size,
-        from,
-        to,
-        StageUtils.move_speed_to_num(this.data.data.moveSpeed)
-      )
+    const is_moved = from.x !== to.x || from.y !== to.y
+    const move_duration_ms = is_moved ? StageUtils.move_speed_to_num(this.data.data.moveSpeed) : 0
+
+    // 退场动作与滑出并发播放（不等待播完，模型离场后动作自然中断）
+    const exit_motion = this.data.data.motion
+    const exit_facial = this.data.data.facial
+    if (exit_motion) {
+      model.applyMotion(exit_motion, true).catch((e) => {
+        this.logger.warn(`LayoutClear motion '${exit_motion}' failed`, e)
+      })
+    }
+    if (exit_facial) {
+      model.applyFacial(exit_facial).catch((e) => {
+        this.logger.warn(`LayoutClear facial '${exit_facial}' failed`, e)
+      })
     }
 
-    this.app.layerModel.removeModel(model)
+    // 淡出与滑出等长：角色边滑边隐，而不是瞬间消失
+    const hide_duration_ms = is_moved ? Math.max(move_duration_ms, 400) : 300
+    const hide_task = model.hide(hide_duration_ms)
+
+    if (!is_moved) {
+      model.setPositionRel(this.app.stage_size, to)
+    }
+
+    const move_task = is_moved ? model.move(this.app.stage_size, from, to, move_duration_ms) : null
 
     await hide_task
     if (move_task) await move_task
+
+    // 动画全部结束后再移出渲染层；提前移除会导致淡出/滑出不可见（硬切消失）
+    this.app.layerModel.removeModel(model)
   }
 }
