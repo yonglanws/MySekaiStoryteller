@@ -1,7 +1,0 @@
-{
-  "port": 9881,
-  "host": "127.0.0.1",
-  "remoteTtsEnabled": true,
-  "remoteTtsUrl": "http://127.0.0.1:9882",
-  "remoteTtsGptUrl": "http://127.0.0.1:9880"
-}

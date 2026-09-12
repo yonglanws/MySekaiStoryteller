@@ -1,0 +1,89 @@
+# =============================================================================
+# MySekaiStoryteller 渲染宿主统一配置
+# =============================================================================
+# 使用方法：
+#   cp config.example.yaml config.yaml   然后按需修改 config.yaml
+#
+# 优先级：MSS_* 环境变量 > config.yaml > 内置默认值（即本文件的注释值）
+# config.yaml 不会被 git 跟踪，可放心存放私有路径
+
+# ---------------------------------------------------------------------------
+# 服务监听
+# ---------------------------------------------------------------------------
+server:
+  port: 9881          # API / 静态资源 / 桥接层共用端口（env: MSS_PORT）
+  host: 0.0.0.0       # 监听地址；仅本机使用可改 127.0.0.1（env: MSS_HOST）
+
+# ---------------------------------------------------------------------------
+# 视频导出参数
+# ---------------------------------------------------------------------------
+video:
+  width: 1280         # 输出视频宽度
+  height: 720         # 输出视频高度
+  fps: 30             # 帧率
+  crf: 28             # 质量因子（越小质量越高、体积越大）
+  renderScale: 1.5    # 渲染超采样倍率（1 = 1:1，1.5 = 抗锯齿更好、更吃性能）
+  audioBitrate: 128k  # 音频码率
+  encoder: auto       # 视频编码器：auto | nvenc | amd | intel | libx264
+                      # auto 自动探测硬件编码器（NVIDIA→AMD→Intel），全部失败回退 libx264
+                      # NVIDIA 服务器推荐 auto 或 nvenc（env: MSS_FFMPEG_ENCODER）
+
+# ---------------------------------------------------------------------------
+# 渲染池（无头浏览器工作进程）
+# ---------------------------------------------------------------------------
+render:
+  workers: 1                      # 并行渲染 worker 数（每 worker 独立 WebGL 上下文，
+                                  # 约占 300-500MB 内存；按显存/内存调整）（env: MSS_WORKERS）
+  workerRecycleExports: 5         # 每个页面完成 N 次导出后回收重建，防止 Live2D 内存累积（0 = 不回收）
+  browserChannels:                # 浏览器探测顺序，依次回退（env: MSS_BROWSER_CHANNELS）
+    - msedge
+    - chrome
+    - chromium
+  browserExecutablePath: ""       # 显式指定浏览器可执行文件，优先于 channels（env: MSS_BROWSER_EXECUTABLE）
+  extraChromeArgs: ""             # 附加 Chrome 启动参数，空格分隔（env: MSS_CHROME_ARGS）
+                                  # NVIDIA 无头 WebGL 调优示例: "--use-angle=gl"
+  linuxGpuAngle: true             # Linux 上自动追加 --use-angle=gl（NVIDIA 硬件 WebGL 关键参数）（env: MSS_LINUX_GPU_ANGLE）
+
+# ---------------------------------------------------------------------------
+# 路径（相对仓库根，也可写绝对路径）
+# ---------------------------------------------------------------------------
+paths:
+  output: apifile                 # 导出视频与故事 JSON 的输出目录（env: MSS_OUTPUT_DIR）
+  resources: resources            # 资源根：models/ images/ voices/ audio/ stories/（env: MSS_RESOURCE_DIR）
+  webRenderer: out/webrenderer    # webrenderer 构建产物目录（npm run build:web 生成）
+
+# ---------------------------------------------------------------------------
+# TTS 语音合成（GPT-SoVITS）
+# ---------------------------------------------------------------------------
+tts:
+  enabled: true                   # 关闭后导出仍会成功，只是没有角色配音
+  apiBaseUrl: http://127.0.0.1:9880   # GPT-SoVITS 服务地址（api_v2）
+  defaultRefAudioPath: ""         # 默认参考音频（GPT-SoVITS 服务端可访问的路径）
+  defaultPromptText: ""           # 默认参考音频的提示文本
+  promptLang: ja                  # 提示文本语言
+  textLang: ja                    # 合成文本语言
+  speedFactor: 1.0                # 语速倍率
+  gptWeightsPath: ""              # 可选：全局默认 GPT 权重（GPT-SoVITS 服务端本地路径）
+  sovitsWeightsPath: ""           # 可选：全局默认 SoVITS 权重
+  # 角色专属声音（未列出的角色使用上方默认值）
+  characters: []
+  # characters:
+  #   - characterName: 晓山瑞希
+  #     refAudioPath: /path/to/ref.wav    # GPT-SoVITS 服务端本地路径
+  #     promptText: 参考音频说的话
+  #     promptLang: ja
+  #     gptWeightsPath: ""                # 可选：角色专属 GPT 权重
+  #     sovitsWeightsPath: ""             # 可选：角色专属 SoVITS 权重
+
+# ---------------------------------------------------------------------------
+# 背景音乐
+# ---------------------------------------------------------------------------
+bgm:
+  enabled: true                   # 导出时混入 BGM
+  path: audio/bgm/bg1.mp3         # 相对资源根（resources/）的路径，也可用绝对路径或 http(s) URL
+  volume: 0.2                     # 音量 0.0 - 1.0
+
+# ---------------------------------------------------------------------------
+# 日志
+# ---------------------------------------------------------------------------
+logLevel: info                    # silly | trace | debug | info | warn | error | fatal（env: MSS_LOG_LEVEL）

@@ -268,3 +268,9 @@ out-host/
 user-configs-runtime/
 apifile/
 logs/
+
+# unified host config (personal; config.example.yaml is the template)
+config.yaml
+.idea/
+.zcode/
+tests/

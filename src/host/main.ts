@@ -1,7 +1,6 @@
 import { ILogObj, Logger } from 'tslog'
 import { loadHostConfig } from './config'
 import { VideoApiServer } from './servers/VideoApiServer'
-import { TTSServiceServer } from './servers/TTSServiceServer'
 import { createBridgeRouter } from './bridge/bridgeRoutes'
 import { WsHub } from './bridge/wsHub'
 import { RenderPool } from './pool/renderPool'
@@ -10,12 +9,13 @@ import { createStaticRouter } from './static/staticRoutes'
 /**
  * MySekaiStoryteller 纯 API 渲染宿主。
  *
- * 组成：
- * - VideoApiServer  :9881  视频导出 API（与旧版端点契约一致）
- * - 静态托管         :9881  webrenderer 页面 / 内置资源 / apifile
- * - 桥接层           :9881  /bridge/*（invoke、二进制写盘、TTS/翻译代理、WS）
- * - TTSServiceServer :9882  GPT-SoVITS 代理与角色声音管理
- * - RenderPool              无头浏览器渲染工作进程池
+ * 组成（单端口 9881）：
+ * - VideoApiServer  视频导出 API（与旧版端点契约一致）
+ * - 静态托管         webrenderer 页面 / resources 资源 / apifile 产物
+ * - 桥接层 /bridge/* invoke、二进制写盘、TTS/翻译代理、WebSocket
+ * - RenderPool      无头浏览器渲染工作进程池
+ *
+ * 配置来源：config.yaml（样例 config.example.yaml），MSS_* 环境变量可覆盖。
  */
 async function bootstrap(): Promise<void> {
   const config = loadHostConfig()
@@ -40,7 +40,7 @@ async function bootstrap(): Promise<void> {
   })
 
   logger.info(
-    `Starting MySekaiStoryteller host: root=${config.rootDir}, port=${config.port}, ttsPort=${config.ttsPort}, workers=${config.workers}, encoder=${config.ffmpegEncoder}`
+    `Starting MySekaiStoryteller host: root=${config.rootDir}, port=${config.server.port}, workers=${config.render.workers}, encoder=${config.video.encoder}`
   )
 
   const hub = new WsHub(logger, {
@@ -52,9 +52,10 @@ async function bootstrap(): Promise<void> {
   const pool = new RenderPool(logger, config, hub)
 
   const apiServer = new VideoApiServer(logger, {
-    port: config.port,
-    host: config.host,
-    outputDir: config.outputDir,
+    port: config.server.port,
+    host: config.server.host,
+    outputDir: config.paths.output,
+    video: config.video,
     registerExtraRoutes: (app) => {
       app.use('/bridge', createBridgeRouter({ logger, config }))
       app.use(createStaticRouter(config))
@@ -82,11 +83,9 @@ async function bootstrap(): Promise<void> {
     host: {
       platform: process.platform,
       node: process.version,
-      ffmpegEncoder: config.ffmpegEncoder
+      ffmpegEncoder: config.video.encoder
     }
   }))
-
-  const ttsServer = new TTSServiceServer(logger, {}, config.ttsPort, config.host)
 
   try {
     await apiServer.start()
@@ -105,15 +104,7 @@ async function bootstrap(): Promise<void> {
 
   await pool.start()
 
-  try {
-    await ttsServer.start()
-  } catch (error) {
-    logger.error('Failed to start TTS service server (continuing without TTS proxy)', error)
-  }
-
-  logger.info(
-    `Host ready: API http://${config.host}:${config.port}/api/v1/health, TTS http://${config.host}:${config.ttsPort}/health`
-  )
+  logger.info(`Host ready: API http://${config.server.host}:${config.server.port}/api/v1/health`)
 
   let shuttingDown = false
   const shutdown = async (signal: string): Promise<void> => {
@@ -125,7 +116,6 @@ async function bootstrap(): Promise<void> {
     } catch (err) {
       logger.warn('Pool stop failed', err)
     }
-    ttsServer.stop()
     apiServer.stop()
     process.exit(0)
   }

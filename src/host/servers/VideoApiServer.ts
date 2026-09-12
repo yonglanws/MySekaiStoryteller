@@ -3,14 +3,7 @@ import { ILogObj, Logger } from 'tslog'
 import * as fs from 'node:fs'
 import path from 'node:path'
 import { StorySchema, StoryData } from '../../common/types/Story'
-
-export const API_VIDEO_WIDTH = 1280
-export const API_VIDEO_HEIGHT = 720
-export const API_RENDER_SCALE = 1.5
-export const API_FPS = 30
-export const API_VIDEO_CODEC = 'h264'
-export const API_VIDEO_CRF = 28
-export const API_AUDIO_BITRATE = '128k'
+import type { VideoSettings } from '../config'
 
 export interface ApiExportRequest {
   story: StoryData
@@ -94,6 +87,7 @@ export class VideoApiServer {
   private readonly port: number
   private readonly host: string
   private readonly outputDir: string
+  private readonly video: VideoSettings
   private readonly fileRetentionMs: number
   private cleanupInterval: ReturnType<typeof setInterval> | null = null
   private lastCleanup: number | null = null
@@ -107,6 +101,7 @@ export class VideoApiServer {
       port: number
       host: string
       outputDir: string
+      video: VideoSettings
       /** 在 API 路由之后挂载额外路由（静态资源、桥接层等），共享同一端口 */
       registerExtraRoutes?: (app: express.Application) => void
     }
@@ -115,6 +110,7 @@ export class VideoApiServer {
     this.port = options.port
     this.host = options.host
     this.outputDir = options.outputDir
+    this.video = options.video
     this.fileRetentionMs = DEFAULT_FILE_RETENTION_MS
     this.ensureOutputDir()
     this.app = express()
@@ -269,13 +265,13 @@ export class VideoApiServer {
         pendingExports: this.pendingExports.size,
         cleanup: this.getCleanupStats(),
         videoConfig: {
-          width: API_VIDEO_WIDTH,
-          height: API_VIDEO_HEIGHT,
-          renderScale: API_RENDER_SCALE,
-          fps: API_FPS,
-          codec: API_VIDEO_CODEC,
-          crf: API_VIDEO_CRF,
-          audioBitrate: API_AUDIO_BITRATE
+          width: this.video.width,
+          height: this.video.height,
+          renderScale: this.video.renderScale,
+          fps: this.video.fps,
+          codec: 'h264',
+          crf: this.video.crf,
+          audioBitrate: this.video.audioBitrate
         },
         ...(this.extraHealthProvider ? this.extraHealthProvider() : {})
       })
@@ -497,13 +493,13 @@ export class VideoApiServer {
     const timeoutMs = body.timeout || DEFAULT_EXPORT_TIMEOUT_MS
 
     const videoConfig: VideoConfig = {
-      width: API_VIDEO_WIDTH,
-      height: API_VIDEO_HEIGHT,
-      renderScale: API_RENDER_SCALE,
-      fps: API_FPS,
-      codec: API_VIDEO_CODEC,
-      crf: API_VIDEO_CRF,
-      audioBitrate: API_AUDIO_BITRATE
+      width: this.video.width,
+      height: this.video.height,
+      renderScale: this.video.renderScale,
+      fps: this.video.fps,
+      codec: 'h264',
+      crf: this.video.crf,
+      audioBitrate: this.video.audioBitrate
     }
 
     const exportPromise = new Promise<ApiExportResponse>((resolve, reject) => {

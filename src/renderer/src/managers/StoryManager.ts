@@ -1,36 +1,25 @@
-import { SelectStoryResponse } from '../../../common/types/IpcResponse'
 import { SnippetData, StoryData } from '../../../common/types/Story'
 import { Live2DModelMap, TextureMap } from '../types/AssetMap'
 import AdvancedModel from '../model/AdvancedModel'
 import { Resource, Texture, Ticker } from 'pixi.js'
 import { Cubism2InternalModel } from 'pixi-live2d-display-advanced'
-import { builtinResourceUrl, externalStoryResourceUrl } from '../utils/ResourceUrl'
+import { resourceUrl } from '../utils/ResourceUrl'
 
+/**
+ * 故事资源管理器：模型 / 背景 / 语音统一从宿主静态资源根（/resources/*）加载。
+ * 纯 API 模式下故事只引用内置资源，不再存在外部剧本目录分支。
+ */
 export default class StoryManager {
-  public readonly storyJsonPath: string
-  public readonly storyFolder: string
   public readonly storyData: StoryData
-  public readonly isBuiltin: boolean
 
-  constructor(story: SelectStoryResponse) {
-    this.storyJsonPath = story.path!
-    this.storyFolder = window.api.getFolder(this.storyJsonPath)
-    this.storyData = story.data!
-    this.isBuiltin =
-      this.storyJsonPath.includes('builtin') || this.storyJsonPath.includes('api-story')
-  }
-
-  private getResourceUrl(subPath: string): string {
-    if (this.isBuiltin) {
-      return builtinResourceUrl(subPath)
-    }
-    return externalStoryResourceUrl(this.storyFolder, subPath)
+  constructor(storyData: StoryData) {
+    this.storyData = storyData
   }
 
   public async preloadModels(): Promise<Live2DModelMap[]> {
     const result: Live2DModelMap[] = []
     for (const model_data of this.storyData.models) {
-      const fullPath = this.getResourceUrl(`models/${model_data.model}`)
+      const fullPath = resourceUrl(`models/${model_data.model}`)
 
       let model: AdvancedModel
 
@@ -71,7 +60,7 @@ export default class StoryManager {
     const result: TextureMap[] = []
 
     for (const image of this.storyData.images) {
-      const imageUrl = this.getResourceUrl(`images/${image.image}`)
+      const imageUrl = resourceUrl(`images/${image.image}`)
 
       let texture: Texture<Resource>
 
@@ -95,7 +84,7 @@ export default class StoryManager {
   }
 
   public geVoiceUrlByName(name: string): string {
-    return this.getResourceUrl(`voices/${name}`)
+    return resourceUrl(`voices/${name}`)
   }
 
   get snippets(): SnippetData[] {

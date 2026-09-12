@@ -17,11 +17,10 @@ interface BridgeDeps {
 
 /**
  * 渲染页面 ↔ 宿主的桥接层。
- * 通道语义与原 Electron IpcHandler 严格对齐：
- * - load/save-config：runtime 目录优先，内置默认目录兜底
- * - api-save-story-temp：写入 apifile 目录
+ * 通道语义与原 Electron IpcHandler 对齐：
  * - api-export-video-from-files：ffmpeg 转码/合流后删除输入文件
  * - tts-fetch：30s 超时代理；translation-fetch：无超时代理
+ * 配置（TTS/BGM）由宿主在任务下发时注入 payload，不再走配置文件通道。
  */
 export function createBridgeRouter(deps: BridgeDeps): Router {
   const { logger, config } = deps
@@ -59,62 +58,6 @@ export function createBridgeRouter(deps: BridgeDeps): Router {
         return baseDir
       }
 
-      case 'electron:load-config': {
-        const key = args[0] as string
-        const candidates = [
-          path.join(config.runtimeConfigDir, 'user-configs', `${key}.json`),
-          path.join(config.defaultConfigDir, `${key}.json`)
-        ]
-        for (const filePath of candidates) {
-          try {
-            if (fs.existsSync(filePath)) {
-              const content = await fs.promises.readFile(filePath, 'utf-8')
-              logger.info(`[Bridge] Loaded config: ${filePath}`)
-              return content
-            }
-          } catch (err) {
-            logger.warn(`[Bridge] Failed to read config ${filePath}`, err)
-          }
-        }
-        return null
-      }
-
-      case 'electron:save-config': {
-        const payload = args[0] as { key: string; value: string }
-        const configPath = path.join(config.runtimeConfigDir, 'user-configs')
-        if (!fs.existsSync(configPath)) {
-          await fs.promises.mkdir(configPath, { recursive: true })
-        }
-        const filePath = path.join(configPath, `${payload.key}.json`)
-        await fs.promises.writeFile(filePath, payload.value, 'utf-8')
-        logger.info(`[Bridge] Config saved to: ${filePath}`)
-        return null
-      }
-
-      case 'electron:api-save-story-temp': {
-        const payload = args[0] as { storyData: unknown }
-        try {
-          const apiFileDir = config.outputDir
-          if (!fs.existsSync(apiFileDir)) {
-            await fs.promises.mkdir(apiFileDir, { recursive: true })
-          }
-          const storyPath = path.join(apiFileDir, `api-story-${Date.now()}.sekai-story.json`)
-          await fs.promises.writeFile(
-            storyPath,
-            JSON.stringify(payload.storyData, null, 2),
-            'utf-8'
-          )
-          logger.info(`[Bridge] API: Story saved to apifile dir: ${storyPath}`)
-          return { success: true, path: storyPath }
-        } catch (error) {
-          logger.error('[Bridge] API: Failed to save story temp file', error)
-          return {
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-          }
-        }
-      }
-
       case 'electron:api-export-video-from-files': {
         const payload = args[0] as {
           videoPath: string
@@ -136,7 +79,7 @@ export function createBridgeRouter(deps: BridgeDeps): Router {
             await fs.promises.mkdir(outputDir, { recursive: true })
           }
 
-          const encoder = config.ffmpegEncoder as VideoEncoderChoice
+          const encoder = config.video.encoder as VideoEncoderChoice
 
           if (payload.audioPath && fs.existsSync(payload.audioPath)) {
             await apiMergeVideoAudioWithCompression(

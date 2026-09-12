@@ -32,32 +32,30 @@
 
 - **渲染引擎**: PixiJS + Live2D 跑在无头 Chrome 里（Playwright 渲染池，每个页面独立 WebGL 上下文）
 - **视频编码**: ffmpeg 自动探测 NVENC / AMF / QSV 硬件编码，失败自动回退 CPU
-- **音频**: 内置 BGM + TTS 语音合成（GPT-SoVITS 本地服务或远程 TTS 服务）
+- **音频**: 内置 BGM + GPT-SoVITS 语音合成（无 TTS 时自动跳过配音，导出不受影响）
 - **队列管理**: 任务排队、并发导出、IP 限流、过期文件自动清理
-- **AI 集成**: AstrBot 插件支持 LLM 生成剧本 → 自动渲染 → 自动发视频
+- **统一配置**: 单个 `config.yaml`，全字段中文注释，环境变量可覆盖
 
-## 与原项目的主要差异
-
-|            | 原项目（Electron 桌面应用）   | 本项目（纯 API 渲染框架）            |
-| ---------- | ----------------------- | ------------------------------ |
-| 运行形态      | 桌面窗口应用     | 无头 Node 服务，仅 HTTP API          |
-| 桌面环境依赖     | 需要 GUI                  | 无需 GUI / Xorg / Xvfb           |
-| 渲染宿主       | Electron 窗口（隐藏/离屏）      | Playwright 管理的无头 Chrome 渲染池    |
-| 导出并发       | 单窗口串行                   | N 个 worker 真并行（独立 WebGL 上下文）   |
-| 视频编码       | 固定 libx264（CPU）         | 自动探测 NVENC/AMF/QSV，失败回退 CPU    |
-| 进程隔离       | 无                       | 单任务崩溃不影响服务，页面按次数自动回收           |
-
-## 快速开始
-
-### 构建与启动
+## 快速开始（5 分钟）
 
 ```bash
 git clone https://github.com/yonglanws/MySekaiStoryteller.git
 cd MySekaiStoryteller
 
+# 1. 安装依赖（ffmpeg 无需手动装，npm 包 ffmpeg-static 会自动带上）
 npm ci
-npm run build      # 类型检查 + webrenderer 构建 + 宿主构建
-npm start          # 启动宿主（默认 0.0.0.0:9881 + TTS 9882）
+
+# 2. 无 Edge/Chrome 的机器需要装一个浏览器（Windows 一般自带 Edge，可跳过）
+npx playwright install chromium
+
+# 3. 生成配置文件（每项都有中文注释，按需修改）
+cp config.example.yaml config.yaml
+
+# 4. 构建（类型检查 + webrenderer + 宿主）
+npm run build
+
+# 5. 启动
+npm start
 ```
 
 启动后验证：
@@ -67,18 +65,16 @@ curl http://127.0.0.1:9881/api/v1/health
 # renderPool.webglRenderers 应显示真实 GPU（如 NVIDIA / Intel），而非 SwiftShader
 ```
 
-### 端到端测试
+跑一个真实导出验证全链路：
 
 ```bash
-npm run e2e                        # 内置示例故事导出 + 产物断言
+npm run e2e                        # 内置示例故事导出 + 产物断言（编码/分辨率/时长/音轨）
 node scripts/test-parallel.mjs 2   # 并发导出验证
 ```
 
-E2E 会自动把示例故事中缺失的模型变体替换为本机实际存在的资源。
-
 ### Linux 服务器部署（NVIDIA 硬件加速）
 
-详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、全部环境变量、
+详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、配置说明、
 systemd 单元、NVENC 验证三步与无 GPU 时的参数调优。
 
 ## AstrBot 插件
@@ -119,7 +115,7 @@ pip install -r requirements.txt
 
 > **提示**：完整指令别名、配置说明与故障排除见[插件文档](astrbot_plugin_msst/README.md)。
 
-**配置项：**
+**插件配置项（AstrBot WebUI）：**
 
 | 配置项                      | 说明                        | 默认值                     |
 | ------------------------ | ------------------------- | ----------------------- |
@@ -146,9 +142,6 @@ pip install -r requirements.txt
 | `/api/v1/health`                  | GET  | 健康检查（含渲染池/GPU 状态） |
 | `/api/v1/status`                  | GET  | 队列状态      |
 
-TTS 代理服务（默认 `:9882`）：`/synthesize`、`/synthesize/audio`、`/synthesize/batch`、
-`/config`、`/character`、`/characters`、`/health` 等。
-
 ## 故事文件格式
 
 故事通过 `*.sekai-story.json` 文件定义，包含 `models`、`images` 和 `snippets` 三个字段：
@@ -172,36 +165,42 @@ TTS 代理服务（默认 `:9882`）：`/synthesize`、`/synthesize/audio`、`/s
 }
 ```
 
-模型/背景/语音等资源放在 `resources/builtin/`（宿主通过 `/resources/builtin/*` 提供访问）。
-通过 API 导出时直接在请求体中提交完整故事 JSON，无需落盘。
+- 故事内的 `model` / `image` 路径相对于**资源根** `resources/`（即 `resources/models/...`、`resources/images/...`），
+  宿主通过 `/resources/*` 提供访问
+- 内置示例故事在 `resources/stories/`，开箱即可用于 `npm run e2e`
+- 通过 API 导出时直接在请求体中提交完整故事 JSON；宿主会自动留档一份到 `apifile/` 便于排查
 
-## TTS 配置
+## TTS / BGM 配置
 
-### 本地 TTS 服务
+全部在 `config.yaml` 中完成（见 `config.example.yaml` 的 `tts:` / `bgm:` 节）：
 
-项目使用 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS) TTS 服务：
-
-1. 启动 GPT-SoVITS（默认端口 `9880`）
-2. 通过 `user-configs/mss-tts-config.json`（或 `MSS_CONFIG_DIR` 运行时配置）配置
-   角色参考音频与提示文本
-
-### 远程 TTS 服务
-
-宿主内置 TTS 代理服务（默认端口 `9882`）：合成、批量合成、角色声音注册、缓存管理、
-自动健康检查。无 TTS 时导出仍会成功（自动跳过语音），只是没有角色配音。
+1. 启动 [GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)（默认端口 `9880`），
+   把地址填入 `tts.apiBaseUrl`
+2. 在 `tts.characters` 下为每个角色配置参考音频（`refAudioPath` 为 **GPT-SoVITS 服务端**可访问的路径）
+   与提示文本
+3. BGM 放在 `resources/audio/bgm/` 下，`bgm.path` 填相对资源根的路径（如 `audio/bgm/bg1.mp3`）
+4. `tts.enabled: false` 可整体关闭配音；无 TTS 时导出仍会成功，只是没有角色配音
 
 ## 项目结构
 
 ```
-src/host/        Node 宿主：API 服务 / 桥接层 / 渲染池 / ffmpeg 编码
-src/webrender/   渲染工作进程页面（无头浏览器加载）
-src/renderer/    渲染引擎（PixiJS + Live2D + 导出管线）
-src/shared/      宿主与渲染侧共享的 ffmpeg 模块
-resources/       内置 Live2D 模型 / 背景 / 语音 / 示例故事
+config.example.yaml   统一配置样例（复制为 config.yaml 使用，config.yaml 不入库）
+src/host/             Node 宿主：API 服务 / 静态托管 / 桥接层 / 渲染池 / ffmpeg 编码
+src/webrender/        渲染工作进程页面（无头浏览器加载，构建产物在 out/webrenderer/）
+src/renderer/         渲染引擎（PixiJS + Live2D + 导出管线）
+src/shared/           宿主与渲染侧共享的 ffmpeg 模块
+resources/            资源根：models/ images/ voices/ audio/bgm/ stories/
 astrbot_plugin_msst/  AstrBot 机器人插件
+out-host/             宿主编译产物（npm run build:host 生成）
+docs/                 部署文档；deploy/ systemd 单元；scripts/ 测试与工具脚本
 ```
 
 ## 故障排除
+
+**Q: 启动报 "Failed to launch any browser"**
+
+系统没有 Edge/Chrome 且未下载 playwright 浏览器。执行 `npx playwright install chromium`
+或安装系统 Chrome/Edge。
 
 **Q: health 里 WebGL renderer 显示 SwiftShader / llvmpipe**
 
@@ -211,8 +210,8 @@ WebGL 落到了软件渲染，导出会慢 5-10 倍。Linux + NVIDIA 下尝试
 **Q: 视频导出失败或卡住**
 
 - 查看宿主日志中的 ffmpeg / 渲染错误
-- 尝试降低 `MSS_WORKERS`（显存/内存不足时）
-- 确认 `MSS_FFMPEG_ENCODER` 对应的硬件在当前机器可用（失败会自动回退 CPU）
+- 尝试降低 `render.workers`（显存/内存不足时）
+- 确认 `video.encoder` 对应的硬件在当前机器可用（失败会自动回退 CPU）
 
 **Q: AstrBot 插件无法连接**
 

@@ -17,7 +17,7 @@ import { createRequire } from 'node:module'
 const API_URL = process.env.MSS_API_URL || 'http://127.0.0.1:9881'
 const STORY_FILE =
   process.env.MSS_E2E_STORY ||
-  path.resolve('resources/builtin/multi-character-demo.sekai-story.json')
+  path.resolve('resources/stories/multi-character-demo.sekai-story.json')
 
 let failures = 0
 function check(name, ok, detail = '') {
@@ -188,8 +188,8 @@ function probeWithFfmpeg(videoPath, ffmpegPath) {
  * 用实际存在的资源替换，保证 E2E 在任何机器上可跑。
  */
 function adaptStoryToAvailableAssets(story) {
-  const modelsRoot = path.resolve('resources/builtin/models')
-  const imagesRoot = path.resolve('resources/builtin/images')
+  const modelsRoot = path.resolve('resources/models')
+  const imagesRoot = path.resolve('resources/images')
 
   const availableModels = globSync('**/*.model3.json', { cwd: modelsRoot }).sort()
   const availableImages = existsSync(imagesRoot)

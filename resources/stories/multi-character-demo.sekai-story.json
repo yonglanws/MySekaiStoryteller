@@ -10,7 +10,7 @@
     },
     {
       "id": 2,
-      "model": "20mizuki/20mizuki_jc/20mizuki_jc.model3.json",
+      "model": "20mizuki/20mizuki_normal/20mizuki_normal.model3.json",
       "normal_scale": 2.1,
       "small_scale": 1.8,
       "anchor": 0.5

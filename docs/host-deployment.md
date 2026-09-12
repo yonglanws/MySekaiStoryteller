@@ -8,11 +8,10 @@
 
 ```
 Node 20 宿主（单进程 + N 个无头浏览器渲染工作进程）
-├─ :9881  VideoApiServer      视频导出 API（端点与旧版完全一致）
-├─ :9881  静态托管             / 渲染页面 · /resources/builtin/* · /apifile/*
-├─ :9881  桥接层 /bridge/*     invoke · 二进制写盘 · TTS/翻译代理 · WebSocket
-├─ :9882  TTSServiceServer     GPT-SoVITS 代理 / 角色声音管理 / 合成缓存
-└─ RenderPool                  N 个无头 Chrome 页面（每页独立 WebGL 上下文）
+├─ :9881  VideoApiServer   视频导出 API（端点与旧版完全一致）
+├─ :9881  静态托管          / 渲染页面 · /resources/* · /apifile/*
+├─ :9881  桥接层 /bridge/*  invoke · 二进制写盘 · TTS/翻译代理 · WebSocket
+└─ RenderPool             N 个无头 Chrome 页面（每页独立 WebGL 上下文）
 ```
 
 导出数据流（与旧版语义一致）：
@@ -25,7 +24,7 @@ AstrBot 插件（`astrbot_plugin_msst/`）**零改动兼容**。
 | 组件 | 说明 |
 | --- | --- |
 | Node.js ≥ 20 | 推荐 22 LTS |
-| Chrome / Edge / Chromium | 渲染工作进程。自动按 `MSS_BROWSER_CHANNELS` 顺序探测（默认 msedge → chrome → chromium），Linux 服务器若无系统浏览器会自动回退到 playwright 自带 Chromium |
+| Chrome / Edge / Chromium | 渲染工作进程。自动按 `render.browserChannels` 顺序探测（默认 msedge → chrome → chromium）；无系统浏览器时先执行 `npx playwright install chromium` |
 | ffmpeg | 编码器。优先 `MSS_FFMPEG_PATH`，其次 npm 包 `ffmpeg-static`（安装时自动下载），最后 PATH |
 | NVIDIA 驱动（服务器） | `nvidia-smi` 可用即可，**不需要 Xorg / Xvfb / 桌面环境** |
 
@@ -34,9 +33,41 @@ AstrBot 插件（`astrbot_plugin_msst/`）**零改动兼容**。
 ```bash
 git clone <repo> && cd MySekaiStoryteller
 npm ci
-npm run build        # typecheck + vite(webrenderer) + tsc(host)
-npm start            # node out-host/host/main.js
+npx playwright install chromium   # 服务器上没有 Edge/Chrome 时需要
+cp config.example.yaml config.yaml
+vim config.yaml                   # 至少看一下 server/video/render 节
+npm run build                     # typecheck + vite(webrenderer) + tsc(host)
+npm start                         # node out-host/host/main.js
 ```
+
+## 配置（config.yaml）
+
+所有配置集中在仓库根的 `config.yaml`（从 `config.example.yaml` 复制，每个字段都有中文注释）。
+**`config.yaml` 不入库**，升级代码不会覆盖你的配置。
+
+| 节 | 内容 |
+| --- | --- |
+| `server` | 端口、监听地址 |
+| `video` | 分辨率、帧率、CRF、渲染超采样、音频码率、**编码器**（auto/nvenc/amf/intel/libx264） |
+| `render` | worker 数、页面回收周期、浏览器探测顺序、附加 Chrome 参数、Linux GPU 开关 |
+| `paths` | 输出目录（apifile）、资源根（resources）、webrenderer 产物目录 |
+| `tts` | GPT-SoVITS 地址、启停、全局/角色参考音频与权重 |
+| `bgm` | 启停、BGM 路径（相对资源根，如 `audio/bgm/bg1.mp3`）、音量 |
+
+环境变量可覆盖同名配置（适合 systemd/容器注入），见下表。
+
+### 环境变量
+
+| 变量 | 覆盖的配置 | 说明 |
+| --- | --- | --- |
+| `MSS_PORT` / `MSS_HOST` | `server.port` / `server.host` | 监听 |
+| `MSS_VIDEO_WIDTH` / `MSS_VIDEO_HEIGHT` / `MSS_VIDEO_FPS` / `MSS_VIDEO_CRF` | `video.*` | 输出参数 |
+| `MSS_FFMPEG_ENCODER` | `video.encoder` | auto/nvenc/amf/intel/libx264 |
+| `MSS_WORKERS` / `MSS_WORKER_RECYCLE_EXPORTS` | `render.*` | 渲染池 |
+| `MSS_BROWSER_CHANNELS` / `MSS_BROWSER_EXECUTABLE` / `MSS_CHROME_ARGS` / `MSS_LINUX_GPU_ANGLE` | `render.*` | 浏览器 |
+| `MSS_OUTPUT_DIR` / `MSS_RESOURCE_DIR` / `MSS_WEB_RENDERER_DIR` | `paths.*` | 路径 |
+| `MSS_FFMPEG_PATH` | （独立） | 显式指定 ffmpeg 可执行文件 |
+| `MSS_LOG_LEVEL` | `logLevel` | silly/trace/debug/info/warn/error/fatal |
 
 启动后自检：
 
@@ -66,27 +97,8 @@ npm run e2e                        # 内置示例故事导出 + ffprobe 断言
 node scripts/test-parallel.mjs 2   # 双任务并发导出验证
 ```
 
-E2E 会自动把示例故事中缺失的模型变体替换为本机实际存在的资源。
-
-## 环境变量
-
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `MSS_PORT` | `9881` | API / 静态 / 桥接层共用端口 |
-| `MSS_TTS_PORT` | `9882` | TTS 代理服务端口 |
-| `MSS_HOST` | `0.0.0.0` | 监听地址 |
-| `MSS_OUTPUT_DIR` | `apifile` | 视频/故事输出目录 |
-| `MSS_RESOURCE_DIR` | `resources/builtin` | 内置模型/背景/语音目录 |
-| `MSS_CONFIG_DIR` | `user-configs-runtime` | 运行时可写配置目录（save-config 写这里；load 优先读它，再回退 `user-configs/` 内置默认） |
-| `MSS_WORKERS` | `1` | 渲染工作进程数（= 并行导出上限，按显存与内存调整，每 worker 约 300-500MB） |
-| `MSS_WORKER_RECYCLE_EXPORTS` | `5` | 每个页面完成 N 次导出后回收重建（防 Live2D 内存累积，0 = 不回收） |
-| `MSS_FFMPEG_ENCODER` | `auto` | `auto`（探测 nvenc→amf→qsv，全无则 libx264）· `nvenc` · `amd` · `intel` · `libx264`；硬件编码器初始化失败自动回退 CPU |
-| `MSS_FFMPEG_PATH` | 自动 | 显式指定 ffmpeg 可执行文件 |
-| `MSS_BROWSER_CHANNELS` | `msedge,chrome,chromium` | 浏览器探测顺序（依次回退到 playwright 自带） |
-| `MSS_BROWSER_EXECUTABLE` | - | 显式指定浏览器可执行文件（优先于 channel） |
-| `MSS_CHROME_ARGS` | - | 附加 Chrome 启动参数（空格分隔） |
-| `MSS_LINUX_GPU_ANGLE` | `1` | Linux 上是否追加 `--use-angle=gl`（NVIDIA 硬件 WebGL 关键参数） |
-| `MSS_LOG_LEVEL` | `info` | silly/trace/debug/info/warn/error/fatal |
+内置示例故事（`resources/stories/`）开箱可跑；E2E 还会把故事中缺失的模型变体
+自动替换为本机实际存在的资源。
 
 ## systemd 部署（Linux 裸机 + NVIDIA）
 
@@ -129,12 +141,13 @@ nvidia-smi dmon -s um      # sm/mem 占用应随导出波动；日志可见 "usi
 
 ### 无 GPU WebGL 时的参数调优
 
-若 health 显示 SwiftShader，按顺序尝试：
+若 health 显示 SwiftShader，按顺序尝试（写进 config.yaml 的
+`render.extraChromeArgs`，或用 `MSS_CHROME_ARGS` 注入）：
 
-```bash
-MSS_CHROME_ARGS="--use-angle=gl --use-gl=angle"        # 方案 A（Linux NVIDIA 常用）
-MSS_CHROME_ARGS="--use-angle=vulkan"                    # 方案 B（较新驱动）
-MSS_LINUX_GPU_ANGLE=0 MSS_CHROME_ARGS="--use-angle=swiftshader"  # 确认症状用
+```text
+--use-angle=gl            # 方案 A（Linux NVIDIA 常用）
+--use-angle=vulkan        # 方案 B（较新驱动）
+--use-angle=swiftshader   # 仅用于确认软件渲染症状
 ```
 
 ## 安全提示

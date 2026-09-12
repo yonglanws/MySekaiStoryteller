@@ -1,54 +1,92 @@
+import fs from 'node:fs'
 import path from 'node:path'
-import * as fs from 'node:fs'
+import yaml from 'js-yaml'
+import { z } from 'zod'
+
+/**
+ * 宿主统一配置。
+ *
+ * 优先级：MSS_* 环境变量 > config.yaml > 内置默认值（schema default）。
+ * 配置样例见仓库根的 config.example.yaml。
+ */
+
+const TtsCharacterSchema = z.object({
+  characterName: z.string(),
+  refAudioPath: z.string().default(''),
+  promptText: z.string().default(''),
+  promptLang: z.string().default('ja'),
+  gptWeightsPath: z.string().default(''),
+  sovitsWeightsPath: z.string().default('')
+})
+
+const ServerSchema = z.object({
+  port: z.number().default(9881),
+  host: z.string().default('0.0.0.0')
+})
+
+const VideoSchema = z.object({
+  width: z.number().default(1280),
+  height: z.number().default(720),
+  fps: z.number().default(30),
+  crf: z.number().default(28),
+  renderScale: z.number().default(1.5),
+  audioBitrate: z.string().default('128k'),
+  encoder: z.string().default('auto')
+})
+
+const RenderSchema = z.object({
+  workers: z.number().default(1),
+  workerRecycleExports: z.number().default(5),
+  browserChannels: z.array(z.string()).default(['msedge', 'chrome', 'chromium']),
+  browserExecutablePath: z.string().default(''),
+  extraChromeArgs: z.string().default(''),
+  linuxGpuAngle: z.boolean().default(true)
+})
+
+const PathsSchema = z.object({
+  output: z.string().default('apifile'),
+  resources: z.string().default('resources'),
+  webRenderer: z.string().default('out/webrenderer')
+})
+
+const TtsSchema = z.object({
+  enabled: z.boolean().default(true),
+  apiBaseUrl: z.string().default('http://127.0.0.1:9880'),
+  defaultRefAudioPath: z.string().default(''),
+  defaultPromptText: z.string().default(''),
+  promptLang: z.string().default('ja'),
+  textLang: z.string().default('ja'),
+  speedFactor: z.number().default(1.0),
+  gptWeightsPath: z.string().default(''),
+  sovitsWeightsPath: z.string().default(''),
+  characters: z.array(TtsCharacterSchema).default([])
+})
+
+const BgmSchema = z.object({
+  enabled: z.boolean().default(true),
+  path: z.string().default('audio/bgm/bg1.mp3'),
+  volume: z.number().default(0.2)
+})
+
+export type TtsCharacter = z.infer<typeof TtsCharacterSchema>
+export type VideoSettings = z.infer<typeof VideoSchema>
+export type TtsSettings = z.infer<typeof TtsSchema>
+export type BgmSettings = z.infer<typeof BgmSchema>
 
 export interface HostConfig {
-  /** 主 API / 静态资源 / 桥接层 共用端口 */
-  port: number
-  /** TTS 代理服务端口 */
-  ttsPort: number
-  /** 监听地址 */
-  host: string
-  /** 仓库根目录（编译产物相对推导） */
   rootDir: string
-  /** 视频与故事输出目录（apifile） */
-  outputDir: string
-  /** 内置资源目录（models/images/voices） */
-  resourceDir: string
-  /** webrenderer 构建产物目录 */
-  webRendererDir: string
-  /** 内置默认配置目录（user-configs） */
-  defaultConfigDir: string
-  /** 运行时可写配置目录（save-config 目标，load 优先级更高） */
-  runtimeConfigDir: string
-  /** 无头浏览器渲染工作进程数量 */
-  workers: number
-  /** 每个渲染工作进程完成多少次导出后回收重建（0 = 不回收） */
-  workerRecycleExports: number
-  /** ffmpeg 视频编码器：auto | nvenc | amd | intel | cpu | libx264 */
-  ffmpegEncoder: string
-  /** 日志级别 */
+  server: z.infer<typeof ServerSchema>
+  video: VideoSettings
+  render: z.infer<typeof RenderSchema>
+  /** paths 已解析为绝对路径 */
+  paths: {
+    output: string
+    resources: string
+    webRenderer: string
+  }
+  tts: TtsSettings
+  bgm: BgmSettings
   logLevel: string
-  /** Playwright channel 偏好顺序 */
-  browserChannels: string[]
-  /** 显式指定浏览器可执行文件（优先于 channel） */
-  browserExecutablePath: string | null
-  /** 附加 Chrome 启动参数（空格分隔） */
-  extraChromeArgs: string[]
-  /** Linux 无头 GPU 是否启用 --use-angle=gl */
-  linuxGpuAngle: boolean
-}
-
-function intEnv(name: string, defaultValue: number): number {
-  const raw = process.env[name]
-  if (!raw) return defaultValue
-  const parsed = parseInt(raw, 10)
-  return Number.isFinite(parsed) ? parsed : defaultValue
-}
-
-function boolEnv(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name]
-  if (raw === undefined || raw === '') return defaultValue
-  return !['0', 'false', 'no', 'off'].includes(raw.toLowerCase())
 }
 
 /**
@@ -57,39 +95,111 @@ function boolEnv(name: string, defaultValue: boolean): boolean {
  */
 function resolveRootDir(): string {
   const derived = path.resolve(__dirname, '..', '..')
-  if (fs.existsSync(path.join(derived, 'resources', 'builtin'))) {
+  if (fs.existsSync(path.join(derived, 'package.json'))) {
     return derived
   }
   return path.resolve(process.cwd())
 }
 
+function readYamlConfig(rootDir: string): Record<string, unknown> {
+  const configPath = path.join(rootDir, 'config.yaml')
+  if (!fs.existsSync(configPath)) {
+    return {}
+  }
+  try {
+    const loaded = yaml.load(fs.readFileSync(configPath, 'utf-8')) as unknown
+    return (loaded && typeof loaded === 'object' ? loaded : {}) as Record<string, unknown>
+  } catch (err) {
+    throw new Error(`Failed to parse config.yaml: ${err instanceof Error ? err.message : err}`)
+  }
+}
+
+function applyEnvOverrides(config: Omit<HostConfig, 'rootDir' | 'paths'>): void {
+  const env = process.env
+
+  // server
+  if (env.MSS_PORT) {
+    const port = parseInt(env.MSS_PORT, 10)
+    if (Number.isFinite(port)) config.server.port = port
+  }
+  if (env.MSS_HOST) config.server.host = env.MSS_HOST
+
+  // video
+  if (env.MSS_FFMPEG_ENCODER) config.video.encoder = env.MSS_FFMPEG_ENCODER.toLowerCase()
+  if (env.MSS_VIDEO_WIDTH) {
+    const v = parseInt(env.MSS_VIDEO_WIDTH, 10)
+    if (Number.isFinite(v)) config.video.width = v
+  }
+  if (env.MSS_VIDEO_HEIGHT) {
+    const v = parseInt(env.MSS_VIDEO_HEIGHT, 10)
+    if (Number.isFinite(v)) config.video.height = v
+  }
+  if (env.MSS_VIDEO_FPS) {
+    const v = parseInt(env.MSS_VIDEO_FPS, 10)
+    if (Number.isFinite(v)) config.video.fps = v
+  }
+  if (env.MSS_VIDEO_CRF) {
+    const v = parseInt(env.MSS_VIDEO_CRF, 10)
+    if (Number.isFinite(v)) config.video.crf = v
+  }
+
+  // render
+  if (env.MSS_WORKERS) {
+    const v = parseInt(env.MSS_WORKERS, 10)
+    if (Number.isFinite(v)) config.render.workers = Math.max(1, v)
+  }
+  if (env.MSS_WORKER_RECYCLE_EXPORTS) {
+    const v = parseInt(env.MSS_WORKER_RECYCLE_EXPORTS, 10)
+    if (Number.isFinite(v)) config.render.workerRecycleExports = Math.max(0, v)
+  }
+  if (env.MSS_BROWSER_CHANNELS) {
+    config.render.browserChannels = env.MSS_BROWSER_CHANNELS.split(',')
+      .map((c) => c.trim())
+      .filter(Boolean)
+  }
+  if (env.MSS_BROWSER_EXECUTABLE) config.render.browserExecutablePath = env.MSS_BROWSER_EXECUTABLE
+  if (env.MSS_CHROME_ARGS) config.render.extraChromeArgs = env.MSS_CHROME_ARGS
+  if (env.MSS_LINUX_GPU_ANGLE !== undefined) {
+    config.render.linuxGpuAngle = !['0', 'false', 'no', 'off'].includes(
+      env.MSS_LINUX_GPU_ANGLE.toLowerCase()
+    )
+  }
+
+  // log
+  if (env.MSS_LOG_LEVEL) config.logLevel = env.MSS_LOG_LEVEL
+}
+
 export function loadHostConfig(): HostConfig {
   const rootDir = resolveRootDir()
-  const isLinux = process.platform === 'linux'
+  const raw = readYamlConfig(rootDir)
+
+  const pathsRaw = PathsSchema.parse(raw.paths ?? {})
+  // 路径的 env 覆盖在解析为绝对路径前应用
+  if (process.env.MSS_OUTPUT_DIR) pathsRaw.output = process.env.MSS_OUTPUT_DIR
+  if (process.env.MSS_RESOURCE_DIR) pathsRaw.resources = process.env.MSS_RESOURCE_DIR
+  if (process.env.MSS_WEB_RENDERER_DIR) pathsRaw.webRenderer = process.env.MSS_WEB_RENDERER_DIR
+
+  const config: Omit<HostConfig, 'rootDir' | 'paths'> = {
+    server: ServerSchema.parse(raw.server ?? {}),
+    video: VideoSchema.parse(raw.video ?? {}),
+    render: RenderSchema.parse(raw.render ?? {}),
+    tts: TtsSchema.parse(raw.tts ?? {}),
+    bgm: BgmSchema.parse(raw.bgm ?? {}),
+    logLevel: z
+      .string()
+      .default('info')
+      .parse(raw.logLevel ?? 'info')
+  }
+
+  applyEnvOverrides(config)
 
   return {
-    port: intEnv('MSS_PORT', 9881),
-    ttsPort: intEnv('MSS_TTS_PORT', 9882),
-    host: process.env.MSS_HOST || '0.0.0.0',
+    ...config,
     rootDir,
-    outputDir: path.resolve(rootDir, process.env.MSS_OUTPUT_DIR || 'apifile'),
-    resourceDir: path.resolve(rootDir, process.env.MSS_RESOURCE_DIR || 'resources/builtin'),
-    webRendererDir: path.resolve(rootDir, process.env.MSS_WEB_RENDERER_DIR || 'out/webrenderer'),
-    defaultConfigDir: path.resolve(rootDir, 'user-configs'),
-    runtimeConfigDir: path.resolve(rootDir, process.env.MSS_CONFIG_DIR || 'user-configs-runtime'),
-    workers: Math.max(1, intEnv('MSS_WORKERS', 1)),
-    workerRecycleExports: Math.max(0, intEnv('MSS_WORKER_RECYCLE_EXPORTS', 5)),
-    ffmpegEncoder: (process.env.MSS_FFMPEG_ENCODER || 'auto').toLowerCase(),
-    logLevel: process.env.MSS_LOG_LEVEL || 'info',
-    browserChannels: (process.env.MSS_BROWSER_CHANNELS || 'msedge,chrome,chromium')
-      .split(',')
-      .map((c) => c.trim())
-      .filter(Boolean),
-    browserExecutablePath: process.env.MSS_BROWSER_EXECUTABLE || null,
-    extraChromeArgs: (process.env.MSS_CHROME_ARGS || '')
-      .split(' ')
-      .map((a) => a.trim())
-      .filter(Boolean),
-    linuxGpuAngle: isLinux && boolEnv('MSS_LINUX_GPU_ANGLE', true)
+    paths: {
+      output: path.resolve(rootDir, pathsRaw.output),
+      resources: path.resolve(rootDir, pathsRaw.resources),
+      webRenderer: path.resolve(rootDir, pathsRaw.webRenderer)
+    }
   }
 }

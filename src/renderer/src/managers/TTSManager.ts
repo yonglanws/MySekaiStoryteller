@@ -7,7 +7,6 @@ import {
   BGMConfig
 } from '../services/TTSService'
 import { TranslationService } from '../services/TranslationService'
-import { RemoteTTSService, RemoteTTSConfig } from '../services/RemoteTTSService'
 import { AudioTrackData } from './video-export/AudioMuxer'
 import getSubLogger from '../utils/Logger'
 import { ILogObj, Logger } from 'tslog'
@@ -65,12 +64,9 @@ export class TTSManager {
   private readonly logger: Logger<ILogObj> = getSubLogger('TTSManager')
   private ttsService: TTSService | null = null
   private translationService: TranslationService | null = null
-  private remoteTTSService: RemoteTTSService | null = null
-  private useRemoteTTS: boolean = false
   private config: TTSConfig
   private translationConfig: TranslationConfig
   private bgmConfig: BGMConfig
-  private remoteTTSConfig: RemoteTTSConfig
   private characterConfigs: Map<string, CharacterVoiceConfig> = new Map()
   private audioTracks: AudioTrackData[] = []
   private currentTimeMs: number = 0
@@ -108,16 +104,8 @@ export class TTSManager {
     }
     this.bgmConfig = {
       enabled: true,
-      path: 'resources/builtin/voices/bg1.mp3',
+      path: 'audio/bgm/bg1.mp3',
       volume: 0.2
-    }
-    this.remoteTTSConfig = {
-      enabled: false,
-      serviceUrl: 'http://127.0.0.1:9882',
-      connectTimeout: 5000,
-      requestTimeout: 60000,
-      maxRetries: 2,
-      retryDelay: 1000
     }
   }
 
@@ -162,48 +150,9 @@ export class TTSManager {
     this.bgmConfig = { ...this.bgmConfig, ...newConfig }
   }
 
-  updateRemoteTTSConfig(newConfig: Partial<RemoteTTSConfig>): void {
-    this.remoteTTSConfig = { ...this.remoteTTSConfig, ...newConfig }
-    this.useRemoteTTS = this.remoteTTSConfig.enabled
-    if (this.useRemoteTTS && !this.remoteTTSService) {
-      this.remoteTTSService = new RemoteTTSService(this.remoteTTSConfig)
-      this.remoteTTSService.startHealthCheck()
-      this.logger.info(`Remote TTS service initialized: ${this.remoteTTSConfig.serviceUrl}`)
-    } else if (this.useRemoteTTS && this.remoteTTSService) {
-      this.remoteTTSService.updateConfig(this.remoteTTSConfig)
-    } else if (!this.useRemoteTTS && this.remoteTTSService) {
-      this.remoteTTSService.dispose()
-      this.remoteTTSService = null
-    }
-  }
-
   setConcurrency(concurrency: number): void {
     this.concurrency = Math.max(1, Math.min(concurrency, 5))
     this.logger.info(`TTS concurrency set to ${this.concurrency}`)
-  }
-
-  getRemoteTTSConfig(): RemoteTTSConfig {
-    return { ...this.remoteTTSConfig }
-  }
-
-  isRemoteTTSAvailable(): boolean {
-    return this.useRemoteTTS && !!this.remoteTTSService?.isAvailable
-  }
-
-  async testRemoteTTSConnection(): Promise<{
-    success: boolean
-    message: string
-    details?: string
-  }> {
-    if (!this.remoteTTSService) {
-      this.remoteTTSService = new RemoteTTSService(this.remoteTTSConfig)
-    }
-    const result = await this.remoteTTSService.checkHealth()
-    return {
-      success: result.available,
-      message: result.available ? '远程TTS服务连接成功' : '远程TTS服务连接失败',
-      details: result.error || (result.info ? JSON.stringify(result.info) : undefined)
-    }
   }
 
   setCharacterVoice(characterName: string, voiceConfig: CharacterVoiceConfig): void {
@@ -212,11 +161,6 @@ export class TTSManager {
     }
     this.characterConfigs.set(characterName, voiceConfig)
     this.ttsService?.setCharacterVoice(characterName, voiceConfig)
-    if (this.remoteTTSService) {
-      this.remoteTTSService.registerCharacter(voiceConfig).catch((err) => {
-        this.logger.warn(`Failed to register character "${characterName}" with remote TTS: ${err}`)
-      })
-    }
     this.logger.info(`Character voice configured: ${characterName}`)
   }
 
@@ -434,10 +378,6 @@ export class TTSManager {
     text: string,
     characterName: string
   ): Promise<{ success: boolean; duration: number }> {
-    if (this.useRemoteTTS && this.remoteTTSService) {
-      return await this.translateAndSynthesizeRemote(text, characterName)
-    }
-
     if (!this.ttsService) {
       this.initialize()
     }
@@ -500,10 +440,6 @@ export class TTSManager {
       } else {
         this.logger.warn(`Translation enabled but no translation service available`)
       }
-    }
-
-    if (this.useRemoteTTS && this.remoteTTSService) {
-      return await this.translateAndSynthesizeRemote(translatedText, characterName)
     }
 
     if (!this.ttsService) {
@@ -626,51 +562,6 @@ export class TTSManager {
     return this.translateAndSynthesizeWithPrefetch(text, characterName)
   }
 
-  private async translateAndSynthesizeRemote(
-    text: string,
-    characterName: string
-  ): Promise<{ success: boolean; duration: number }> {
-    if (!this.remoteTTSService) {
-      this.logger.error('Remote TTS service not initialized')
-      return { success: false, duration: 0 }
-    }
-
-    this.logger.info(`Calling remote TTS service for "${characterName}"`)
-
-    const charConfig = this.characterConfigs.get(characterName)
-    const refAudioPath = charConfig?.refAudioPath || this.config.defaultRefAudioPath || undefined
-    const promptText = charConfig?.promptText || this.config.defaultPromptText || undefined
-    const promptLang = charConfig?.promptLang || this.config.promptLang || undefined
-
-    const result = await this.remoteTTSService.synthesizeAndGetAudio({
-      text,
-      character_name: characterName,
-      text_lang: this.config.textLang,
-      ref_audio_path: refAudioPath,
-      prompt_text: promptText,
-      prompt_lang: promptLang,
-      speed_factor: this.config.speedFactor
-    })
-
-    if (result.success && result.audioBuffer && result.duration_ms > 0) {
-      const audioTrack: AudioTrackData = {
-        audioBuffer: result.audioBuffer,
-        startTime: this.currentTimeMs,
-        endTime: this.currentTimeMs + result.duration_ms,
-        characterName,
-        text
-      }
-      this.audioTracks.push(audioTrack)
-      this.logger.info(
-        `Remote TTS track added for "${characterName}" at ${this.currentTimeMs}ms, duration: ${result.duration_ms}ms`
-      )
-      return { success: true, duration: result.duration_ms }
-    }
-
-    this.logger.error(`Remote TTS failed for "${characterName}": ${result.error || 'unknown'}`)
-    return { success: false, duration: 0 }
-  }
-
   getService(): TTSService | null {
     if (!this.ttsService) {
       this.initialize()
@@ -728,12 +619,8 @@ export class TTSManager {
     if (this.translationService) {
       this.translationService.clearCache()
     }
-    if (this.remoteTTSService) {
-      this.remoteTTSService.dispose()
-    }
     this.ttsService = null
     this.translationService = null
-    this.remoteTTSService = null
     this.audioTracks = []
     this.prefetchCache.clear()
   }

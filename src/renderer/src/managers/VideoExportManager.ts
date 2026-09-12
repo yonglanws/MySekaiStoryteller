@@ -1,7 +1,6 @@
 import { App } from '../app/App'
 import AnimationManager from './AnimationManager'
 import { Ticker } from 'pixi.js'
-import { SelectStoryResponse } from '../../../common/types/IpcResponse'
 import {
   ExportLogger,
   CheckpointManager,
@@ -23,7 +22,7 @@ import type { SnippetTimelineEntry } from './TTSManager'
 import { estimateSnippetDuration } from '../utils/TimelineCalculator'
 import { webGLValidator } from '../utils/WebGLContextValidator'
 import { frameValidator } from '../utils/FrameContentValidator'
-import { builtinResourceUrl } from '../utils/ResourceUrl'
+import { resolveBgmUrl } from '../utils/ResourceUrl'
 
 export { VideoExportOptions }
 export interface ExportProgress {
@@ -310,11 +309,7 @@ export default class VideoExportManager {
     if (bgmEnabled && bgmConfig) {
       audioMuxer.setBGMConfig(bgmConfig)
       try {
-        let bgmPath = bgmConfig.path
-        if (bgmPath.startsWith('resources/builtin/')) {
-          const relativePath = bgmPath.replace('resources/builtin/', '')
-          bgmPath = builtinResourceUrl(relativePath)
-        }
+        const bgmPath = resolveBgmUrl(bgmConfig.path)
         this.logger.info(`Loading BGM from: ${bgmPath}`)
         bgmBuffer = await audioMuxer.loadBGMBuffer(bgmPath)
         this.logger.info(
@@ -704,7 +699,7 @@ export default class VideoExportManager {
     options: VideoExportOptions,
     _progressFill: HTMLDivElement | null,
     exportStatus: HTMLElement | null,
-    onProgress: InternalProgressCallback
+    _onProgress: InternalProgressCallback
   ): Promise<{ canvas: HTMLCanvasElement; snippets: SnippetData[] }> {
     const isApiMode = options.apiMode === true
 
@@ -714,27 +709,6 @@ export default class VideoExportManager {
 
     if (isApiMode) {
       this.logger.info('API mode: skipping story reload, using pre-initialized story data')
-    } else {
-      const { story } = await this.getStoryData()
-      this.checkAborted()
-
-      await this.app.initializeManagers(story)
-      this.app.initializeRenderer(2, true)
-      await this.yieldToBrowser()
-
-      onProgress({
-        stage: 'loading',
-        current: 0,
-        total: 1,
-        message: '正在加载资源...',
-        percentage: 0
-      })
-
-      if (exportStatus) exportStatus.textContent = '正在加载资源...'
-      await this.app.preloadStoryAssets()
-      this.app.initializeLayers()
-      await this.yieldToBrowser()
-      this.checkAborted()
     }
 
     const canvas = this.app.pixiApplication.view as HTMLCanvasElement
@@ -820,28 +794,6 @@ export default class VideoExportManager {
 
     if (isApiMode) {
       this.logger.info('API mode: skipping story reload, using pre-initialized story data')
-    } else {
-      const { story } = await this.getStoryData()
-      this.checkAborted()
-
-      await this.app.initializeManagers(story)
-      this.app.initializeRenderer(1, true)
-      await this.yieldToBrowser()
-
-      this.logger.info('Loading assets')
-      onProgress({
-        stage: 'loading',
-        current: 0,
-        total: 1,
-        message: '正在加载资源…',
-        percentage: 0
-      })
-
-      if (exportStatus) exportStatus.textContent = '正在加载资源…'
-      await this.app.preloadStoryAssets()
-      this.app.initializeLayers()
-      await this.yieldToBrowser()
-      this.checkAborted()
     }
 
     const canvas = this.app.pixiApplication.view as HTMLCanvasElement
@@ -933,11 +885,7 @@ export default class VideoExportManager {
     if (bgmEnabled && bgmConfig) {
       audioMuxer.setBGMConfig(bgmConfig)
       try {
-        let bgmPath = bgmConfig.path
-        if (bgmPath.startsWith('resources/builtin/')) {
-          const relativePath = bgmPath.replace('resources/builtin/', '')
-          bgmPath = builtinResourceUrl(relativePath)
-        }
+        const bgmPath = resolveBgmUrl(bgmConfig.path)
         this.logger.info(`Loading BGM from: ${bgmPath}`)
         bgmBuffer = await audioMuxer.loadBGMBuffer(bgmPath)
         this.logger.info(
@@ -1276,29 +1224,6 @@ export default class VideoExportManager {
     }
 
     this.logger.info('Export cleanup completed, Ticker stopped to reduce GPU idle usage')
-  }
-
-  private async getStoryData(): Promise<{ story: SelectStoryResponse }> {
-    const loadBuiltinResult = await window.electron.ipcRenderer.invoke(
-      'electron:load-builtin-story'
-    )
-
-    if (loadBuiltinResult.success) {
-      return { story: loadBuiltinResult }
-    }
-
-    const selectResult = await window.electron.ipcRenderer.invoke(
-      'electron:select-story-file-until-selected'
-    )
-
-    if (!selectResult.success) {
-      if (selectResult.zodIssueMessage) {
-        throw new Error(selectResult.zodIssueMessage)
-      }
-      throw selectResult.error
-    }
-
-    return { story: selectResult }
   }
 
   private async encodeAndSaveVideo(

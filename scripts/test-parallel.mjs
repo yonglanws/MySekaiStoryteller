@@ -7,7 +7,7 @@ import { readFileSync, existsSync, readdirSync, globSync } from 'node:fs'
 const API_URL = process.env.MSS_API_URL || 'http://127.0.0.1:9881'
 const N = parseInt(process.argv[2] || '2', 10)
 const STORY_FILE =
-  process.env.MSS_E2E_STORY || 'resources/builtin/multi-character-demo.sekai-story.json'
+  process.env.MSS_E2E_STORY || 'resources/stories/multi-character-demo.sekai-story.json'
 
 const story = JSON.parse(readFileSync(STORY_FILE, 'utf-8'))
 adaptStoryToAvailableAssets(story)
@@ -15,8 +15,8 @@ const body = JSON.stringify({ story, timeout: 420000 })
 
 /** 内置示例故事可能引用当前目录缺失的模型/背景，替换为实际存在的资源 */
 function adaptStoryToAvailableAssets(story) {
-  const modelsRoot = 'resources/builtin/models'
-  const imagesRoot = 'resources/builtin/images'
+  const modelsRoot = 'resources/models'
+  const imagesRoot = 'resources/images'
   const availableModels = globSync('**/*.model3.json', { cwd: modelsRoot }).sort()
   const availableImages = existsSync(imagesRoot)
     ? readdirSync(imagesRoot)

@@ -1,7 +1,6 @@
 import '@pixi/unsafe-eval'
 import getSubLogger from '../utils/Logger'
 import { ILogObj, Logger } from 'tslog'
-import { SelectStoryResponse } from '../../../common/types/IpcResponse'
 import { StoryData } from '../../../common/types/Story'
 import StoryManager from '../managers/StoryManager'
 import { Live2DModelMap, TextureMap } from '../types/AssetMap'
@@ -20,6 +19,34 @@ import VideoExportManager, {
 } from '../managers/VideoExportManager'
 import AnimationManager from '../managers/AnimationManager'
 import { TTSManager } from '../managers/TTSManager'
+
+/** 宿主统一下发的 TTS 配置（config.yaml 的 tts 节） */
+export interface ApiExportTtsConfig {
+  enabled: boolean
+  apiBaseUrl: string
+  defaultRefAudioPath: string
+  defaultPromptText: string
+  promptLang: string
+  textLang: string
+  speedFactor: number
+  gptWeightsPath: string
+  sovitsWeightsPath: string
+  characters: Array<{
+    characterName: string
+    refAudioPath: string
+    promptText: string
+    promptLang: string
+    gptWeightsPath: string
+    sovitsWeightsPath: string
+  }>
+}
+
+/** 宿主统一下发的 BGM 配置（config.yaml 的 bgm 节） */
+export interface ApiExportBgmConfig {
+  enabled: boolean
+  path: string
+  volume: number
+}
 
 /**
  * 纯 API 渲染工作进程：
@@ -47,9 +74,9 @@ export class App {
   public lastSnippetActualDurationMs: number = 0
   private apiExportInProgress: boolean = false
 
-  public async initializeManagers(story: SelectStoryResponse): Promise<void> {
-    this.storyManager = new StoryManager(story)
-    this.logger.info(`StoryManager initialized, root path: ${this.storyManager.storyFolder}`)
+  public async initializeManagers(storyData: StoryData): Promise<void> {
+    this.storyManager = new StoryManager(storyData)
+    this.logger.info('StoryManager initialized (builtin resources)')
 
     this.snippetStrategyManager = new SnippetStrategyManager(this)
     this.logger.info('SnippetStrategyManager initialized')
@@ -190,6 +217,8 @@ export class App {
             crf: number
             audioBitrate: string
           }
+          tts?: ApiExportTtsConfig
+          bgm?: ApiExportBgmConfig
         }
       ) => {
         if (this.apiExportInProgress) {
@@ -209,7 +238,9 @@ export class App {
           const result = await this.runApiExport(
             payload.story,
             payload.outputPath,
-            payload.videoConfig
+            payload.videoConfig,
+            payload.tts,
+            payload.bgm
           )
           this.logger.info(
             `API export result: success=${result.success}, videoPath=${result.videoPath}`
@@ -250,7 +281,9 @@ export class App {
       codec: string
       crf: number
       audioBitrate: string
-    }
+    },
+    ttsConfig?: ApiExportTtsConfig,
+    bgmConfig?: ApiExportBgmConfig
   ): Promise<{
     success: boolean
     videoPath?: string
@@ -263,24 +296,11 @@ export class App {
       `API export: ${videoConfig.width}x${videoConfig.height}, ${videoConfig.fps}fps, scale=${videoConfig.renderScale}`
     )
 
-    await this.loadAndApplyConfigForApiExport()
+    this.applyApiExportConfig(ttsConfig, bgmConfig)
 
     AnimationManager.exportSpeedMultiplier = 1
 
-    const storyResponse: SelectStoryResponse = {
-      success: true,
-      data: storyData
-    }
-
-    const saveResult = await window.electron.ipcRenderer.invoke('electron:api-save-story-temp', {
-      storyData
-    })
-
-    if (saveResult.success && saveResult.path) {
-      storyResponse.path = saveResult.path
-    }
-
-    await this.initializeManagers(storyResponse)
+    await this.initializeManagers(storyData)
     this.initializeRenderer(videoConfig.renderScale, true)
     await new Promise<void>((resolve) => setTimeout(resolve, 100))
 
@@ -345,54 +365,52 @@ export class App {
     }
   }
 
-  private async loadAndApplyConfigForApiExport(): Promise<void> {
-    try {
-      const ttsConfigStr = await window.electron.ipcRenderer.invoke(
-        'electron:load-config',
-        'mss-tts-config'
-      )
-      if (ttsConfigStr) {
-        const ttsConfig = JSON.parse(ttsConfigStr)
-        this.ttsManager.updateConfig({
-          enabled: ttsConfig.enabled ?? true,
-          apiBaseUrl: ttsConfig.apiBaseUrl ?? 'http://127.0.0.1:9880',
-          defaultRefAudioPath: ttsConfig.refAudio ?? ttsConfig.defaultRefAudioPath ?? '',
-          defaultPromptText: ttsConfig.promptText ?? ttsConfig.defaultPromptText ?? '',
-          promptLang: ttsConfig.promptLang ?? 'ja',
-          speedFactor: ttsConfig.speedFactor ?? 1.0,
-          textLang: ttsConfig.textLang ?? 'ja',
-          gptWeightsPath: ttsConfig.gptWeights ?? ttsConfig.gptWeightsPath ?? '',
-          sovitsWeightsPath: ttsConfig.sovitsWeights ?? ttsConfig.sovitsWeightsPath ?? ''
-        })
-        if (Array.isArray(ttsConfig.characters)) {
-          for (const char of ttsConfig.characters) {
-            if (char.characterName && char.refAudio) {
-              this.ttsManager.setCharacterVoice(char.characterName, {
-                characterName: char.characterName,
-                refAudioPath: char.refAudio,
-                promptText: char.promptText || ttsConfig.promptText || '',
-                promptLang: char.promptLang || ttsConfig.promptLang || 'ja',
-                gptWeightsPath: char.gptWeights || char.gptWeightsPath || undefined,
-                sovitsWeightsPath: char.sovitsWeights || char.sovitsWeightsPath || undefined
-              })
-            }
-          }
-        }
-        this.ttsManager.updateBGMConfig({
-          enabled: ttsConfig.bgmEnabled ?? true,
-          path: ttsConfig.bgmPath ?? 'resources/builtin/voices/bg1.mp3',
-          volume: ttsConfig.bgmVolume ?? 0.2
-        })
-        this.logger.info('API export: TTS config loaded from storage')
-      }
-
-      this.ttsManager.updateTranslationConfig({
-        enabled: false
+  /**
+   * 应用宿主下发的 TTS/BGM 配置（config.yaml 的 tts/bgm 节随任务 payload 传入）。
+   * 翻译固定关闭——翻译由 AstrBot 插件侧的 LLM 完成。
+   */
+  private applyApiExportConfig(
+    ttsConfig?: ApiExportTtsConfig,
+    bgmConfig?: ApiExportBgmConfig
+  ): void {
+    if (ttsConfig) {
+      this.ttsManager.updateConfig({
+        enabled: ttsConfig.enabled,
+        apiBaseUrl: ttsConfig.apiBaseUrl || 'http://127.0.0.1:9880',
+        defaultRefAudioPath: ttsConfig.defaultRefAudioPath || '',
+        defaultPromptText: ttsConfig.defaultPromptText || '',
+        promptLang: ttsConfig.promptLang || 'ja',
+        speedFactor: ttsConfig.speedFactor || 1.0,
+        textLang: ttsConfig.textLang || 'ja',
+        gptWeightsPath: ttsConfig.gptWeightsPath || '',
+        sovitsWeightsPath: ttsConfig.sovitsWeightsPath || ''
       })
-      this.logger.info('API export: Translation disabled (handled by plugin)')
-    } catch (error) {
-      this.logger.warn('API export: Failed to load saved config, using defaults', error)
+      for (const char of ttsConfig.characters || []) {
+        if (char.characterName && char.refAudioPath) {
+          this.ttsManager.setCharacterVoice(char.characterName, {
+            characterName: char.characterName,
+            refAudioPath: char.refAudioPath,
+            promptText: char.promptText || ttsConfig.defaultPromptText || '',
+            promptLang: char.promptLang || ttsConfig.promptLang || 'ja',
+            gptWeightsPath: char.gptWeightsPath || undefined,
+            sovitsWeightsPath: char.sovitsWeightsPath || undefined
+          })
+        }
+      }
+      this.logger.info(
+        `API export: TTS config applied from host (enabled=${ttsConfig.enabled}, characters=${ttsConfig.characters?.length ?? 0})`
+      )
     }
+
+    this.ttsManager.updateBGMConfig({
+      enabled: bgmConfig?.enabled ?? true,
+      path: bgmConfig?.path ?? 'audio/bgm/bg1.mp3',
+      volume: bgmConfig?.volume ?? 0.2
+    })
+
+    this.ttsManager.updateTranslationConfig({
+      enabled: false
+    })
   }
 
   public async run(): Promise<void> {

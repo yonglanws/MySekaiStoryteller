@@ -8,14 +8,12 @@ tsconfig.json
 tsconfig.*.json
 live2d.min.js
 live2dcubismcore.min.js
-resources/builtin/models
-resources/builtin/voices
+resources
+resources/voices
 user-configs
 user-configs-runtime
 apifile
 logs
-fix_motions.js
-fix_motions.py
 astrbot_plugin_msst
 README.md
 .zcode

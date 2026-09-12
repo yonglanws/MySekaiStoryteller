@@ -1,24 +1,29 @@
 /**
- * 资源 URL 构造。
+ * 资源 URL 构造 —— 全仓唯一的资源寻址入口。
  *
- * - Electron（旧桌面模式）：走 mss:// 自定义协议
- * - Web 宿主（无头渲染框架）：走 Node 宿主的静态路由 /resources/builtin/*
+ * 宿主把资源根（config.paths.resources）固定挂在 `/resources/` 路由下，
+ * 故事 JSON 内的 models/、images/、voices/ 相对路径以及 BGM 配置路径
+ * 都通过这里拼成同源 URL。
  */
-export function isWebHost(): boolean {
-  return (globalThis as { __hostMode?: string }).__hostMode === 'web'
+
+/** 资源根 URL（与宿主 staticRoutes 的挂载点保持一致） */
+export const RESOURCE_BASE = '/resources'
+
+/** 资源根下的相对路径 → 同源 URL（subPath 无需以 / 开头） */
+export function resourceUrl(subPath: string): string {
+  return `${RESOURCE_BASE}/${subPath.replace(/^\/+/, '')}`
 }
 
-export function builtinResourceUrl(subPath: string): string {
-  if (isWebHost()) {
-    return `/resources/builtin/${subPath}`
+/**
+ * BGM 路径解析（三态）：
+ * - http(s) 绝对 URL → 原样
+ * - 以 / 开头的路径 → 原样（视为站内绝对路径）
+ * - 其余 → 视为资源根相对路径（兼容旧配置里的 'resources/builtin/...' 前缀）
+ */
+export function resolveBgmUrl(bgmPath: string): string {
+  if (/^https?:\/\//i.test(bgmPath) || bgmPath.startsWith('/')) {
+    return bgmPath
   }
-  return `mss://builtin/${subPath}`
-}
-
-export function externalStoryResourceUrl(storyFolder: string, subPath: string): string {
-  if (isWebHost()) {
-    // Web 宿主只服务内置资源；外部剧本目录不支持
-    return `/resources/builtin/${subPath}`
-  }
-  return `mss://load-file/${storyFolder}/${subPath}`
+  const stripped = bgmPath.replace(/^resources\/builtin\//, '').replace(/^resources\//, '')
+  return resourceUrl(stripped)
 }

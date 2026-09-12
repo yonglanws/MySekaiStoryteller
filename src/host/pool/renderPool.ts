@@ -40,11 +40,16 @@ function baseLaunchArgs(config: HostConfig): string[] {
 
   if (process.platform === 'linux') {
     args.push('--no-sandbox')
-    if (config.linuxGpuAngle) {
+    if (config.render.linuxGpuAngle) {
       args.push('--use-angle=gl')
     }
   }
-  args.push(...config.extraChromeArgs)
+  args.push(
+    ...config.render.extraChromeArgs
+      .split(' ')
+      .map((a) => a.trim())
+      .filter(Boolean)
+  )
   return args
 }
 
@@ -73,7 +78,7 @@ export class RenderPool implements ExportDispatcher {
   async start(): Promise<void> {
     const launchArgs = baseLaunchArgs(this.config)
 
-    for (let i = 0; i < this.config.workers; i++) {
+    for (let i = 0; i < this.config.render.workers; i++) {
       const workerId = `w${i + 1}`
       this.workers.set(workerId, this.createWorkerState(workerId))
       // 串行启动，避免并发启动争抢
@@ -93,7 +98,7 @@ export class RenderPool implements ExportDispatcher {
   stats(): Record<string, unknown> {
     const all = Array.from(this.workers.values())
     return {
-      configuredWorkers: this.config.workers,
+      configuredWorkers: this.config.render.workers,
       readyWorkers: all.filter((w) => w.ready).length,
       idleWorkers: all.filter((w) => w.ready && !w.busy).length,
       busyTaskIds: all.filter((w) => w.busyTaskId).map((w) => w.busyTaskId),
@@ -119,9 +124,9 @@ export class RenderPool implements ExportDispatcher {
   }
 
   private async launchBrowser(launchArgs: string[]): Promise<{ browser: Browser; via: string }> {
-    const channels = this.config.browserExecutablePath
+    const channels = this.config.render.browserExecutablePath
       ? [null]
-      : [...this.config.browserChannels, null]
+      : [...this.config.render.browserChannels, null]
 
     const errors: string[] = []
     for (const channel of channels) {
@@ -129,7 +134,7 @@ export class RenderPool implements ExportDispatcher {
         const browser = await chromium.launch({
           headless: true,
           channel: channel ?? undefined,
-          executablePath: this.config.browserExecutablePath ?? undefined,
+          executablePath: this.config.render.browserExecutablePath || undefined,
           args: launchArgs
         })
         return { browser, via: channel ?? 'bundled-chromium' }
@@ -157,7 +162,7 @@ export class RenderPool implements ExportDispatcher {
       await this.openWorkerPage(worker)
       this.logger.info(
         `[Pool] Worker ${worker.workerId} ready (browser: ${via}, recycle every ${
-          this.config.workerRecycleExports || '∞'
+          this.config.render.workerRecycleExports || '∞'
         } exports)`
       )
     } catch (err) {
@@ -178,7 +183,7 @@ export class RenderPool implements ExportDispatcher {
 
     const readyPromise = this.waitForReady(worker.workerId)
 
-    await page.goto(`http://127.0.0.1:${this.config.port}/?worker=${worker.workerId}`, {
+    await page.goto(`http://127.0.0.1:${this.config.server.port}/?worker=${worker.workerId}`, {
       waitUntil: 'domcontentloaded',
       timeout: 30000
     })
@@ -289,8 +294,8 @@ export class RenderPool implements ExportDispatcher {
 
         // 页面回收：按导出次数重建，防止 Live2D/Cubism 内存累积
         if (
-          this.config.workerRecycleExports > 0 &&
-          worker.exportsCompleted % this.config.workerRecycleExports === 0
+          this.config.render.workerRecycleExports > 0 &&
+          worker.exportsCompleted % this.config.render.workerRecycleExports === 0
         ) {
           this.logger.info(
             `[Pool] Recycling worker ${worker.workerId} after ${worker.exportsCompleted} exports`
@@ -363,7 +368,10 @@ export class RenderPool implements ExportDispatcher {
       taskId: task.taskId,
       story: task.story,
       outputPath: task.outputPath,
-      videoConfig: task.videoConfig
+      videoConfig: task.videoConfig,
+      // TTS/BGM 配置由宿主统一下发，渲染器不再读配置文件
+      tts: { ...this.config.tts },
+      bgm: { ...this.config.bgm }
     }
 
     const sent = this.hub.send(worker.workerId, { type: 'api:start-export', args: [payload] })
