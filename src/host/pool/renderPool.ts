@@ -1,6 +1,6 @@
 import { chromium, Browser, Page } from 'playwright'
 import { ILogObj, Logger } from 'tslog'
-import type { HostConfig } from '../config'
+import type { HostConfig, TtsCharacter } from '../config'
 import type { WsHub, WorkerMessage } from '../bridge/wsHub'
 import type { ExportDispatcher, ExportTask } from '../servers/VideoApiServer'
 
@@ -407,7 +407,7 @@ export class RenderPool implements ExportDispatcher {
    * 而剧本 Talk.speaker 可能用短名（"瑞希"，models.yaml shortName）或全名。
    * 为每个已配置角色补充短名条目，渲染端按 speaker 精确查找即可命中。
    */
-  private expandTtsCharacterAliases() {
+  private expandTtsCharacterAliases(): TtsCharacter[] {
     const characters = this.config.tts.characters
     if (!this.catalog || characters.length === 0) return characters
 
