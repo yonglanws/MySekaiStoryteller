@@ -15,7 +15,7 @@
 
 > [!IMPORTANT]
 > 本项目基于 [Untitled-Story/MySekaiStoryteller](https://github.com/Untitled-Story/MySekaiStoryteller) **二次开发**，
-> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**
+> 将其从 **Electron 桌面应用**重构为**无头纯 API 渲染框架**（`MySekaiStoryteller-API`）。
 > 如需桌面阅读器，请访问原项目。感谢原作者 [GuangChen2333](https://github.com/GuangChen2333) 与
 > [Untitled-Story](https://github.com/Untitled-Story) 组织。
 
@@ -23,7 +23,7 @@
 > [!CAUTION]
 > **本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
 > **不保证大部分功能的可用性与稳定性**。当前仅核心导出链路在有限环境下验证通过，Linux + NVIDIA 生产环境尚待实测。
-> 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller/issues)。
+> 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller-API/issues)。
 
 
 ## 项目简介
@@ -41,8 +41,8 @@
 ## 快速开始（5 分钟）
 
 ```bash
-git clone https://github.com/yonglanws/MySekaiStoryteller.git
-cd MySekaiStoryteller
+git clone https://github.com/yonglanws/MySekaiStoryteller-API.git
+cd MySekaiStoryteller-API
 
 # 1. 安装依赖（ffmpeg 无需手动装，npm 包 ffmpeg-static 会自动带上）
 npm ci
@@ -53,10 +53,12 @@ npx playwright install chromium
 # 3. 生成配置文件（每项都有中文注释，按需修改）
 cp config.example.yaml config.yaml
 
-# 4. 构建（类型检查 + webrenderer + 宿主）
+# 4. 准备渲染资源（模型/背景/剧本，仓库不附带，见下方「资源准备」）
+
+# 5. 构建（类型检查 + webrenderer + 宿主）
 npm run build
 
-# 5. 启动
+# 6. 启动
 npm start
 ```
 
@@ -67,16 +69,33 @@ curl http://127.0.0.1:9881/api/v1/health
 # renderPool.webglRenderers 应显示真实 GPU（如 NVIDIA / Intel），而非 SwiftShader
 ```
 
-跑一个真实导出验证全链路：
+跑一个真实导出验证全链路（需先完成资源准备）：
 
 ```bash
-npm run e2e                        # 内置示例故事导出 + 产物断言（编码/分辨率/时长/音轨）
+npm run e2e                        # 示例故事导出 + 产物断言（编码/分辨率/时长/音轨）
 node scripts/test-parallel.mjs 2   # 并发导出验证
 ```
 
+### 资源准备（必需）
+
+**本仓库不附带渲染资源**（Live2D 模型、背景图、语音、BGM、示例剧本）——为控制仓库体积
+并遵循素材版权要求，仓库只保留目录结构，资源需自行放入（完整说明见
+[resources/README.md](resources/README.md)）：
+
+```bash
+# 方式一：从上游仓库整体拷贝 resources/（模型/背景/剧本/BGM 齐全，按需取舍）
+git clone --depth 1 https://github.com/Untitled-Story/MySekaiStoryteller /tmp/upstream
+cp -r /tmp/upstream/resources/. resources/
+
+# 方式二：使用你已有的资源包，按 resources/README.md 的目录结构放入
+```
+
+资源根不强制叫 `resources/`，可在 `config.yaml` 的 `paths.resources` 或环境变量
+`MSS_RESOURCE_DIR` 指向任意目录。
+
 ### Linux 服务器部署（NVIDIA 硬件加速）
 
-详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、配置说明、
+详见 **[docs/host-deployment.md](docs/host-deployment.md)**：裸机依赖、资源准备、配置说明、
 systemd 单元、NVENC 验证三步与无 GPU 时的参数调优。
 
 ## AstrBot 插件
@@ -122,7 +141,7 @@ pip install -r requirements.txt
 | 配置项                      | 说明                        | 默认值                     |
 | ------------------------ | ------------------------- | ----------------------- |
 | `llm_provider_id`        | 用于生成剧本的 LLM 提供商       | 留空使用当前默认           |
-| `mss_api_url`            | MySekaiStoryteller API 地址 | `http://127.0.0.1:9881` |
+| `mss_api_url`            | MySekaiStoryteller-API 渲染宿主地址 | `http://127.0.0.1:9881` |
 | `export_timeout`         | 视频导出超时时间（秒）               | `600`                   |
 | `max_concurrent_exports` | 最大并发导出数                   | `1`                     |
 | `temp_dir`               | 临时文件存储目录                  | 空（用插件数据目录）          |
@@ -169,7 +188,6 @@ pip install -r requirements.txt
 
 - 故事内的 `model` / `image` 路径相对于**资源根** `resources/`（即 `resources/models/...`、`resources/images/...`），
   宿主通过 `/resources/*` 提供访问
-- 内置示例故事在 `resources/stories/`，开箱即可用于 `npm run e2e`
 - 通过 API 导出时直接在请求体中提交完整故事 JSON；宿主会自动留档一份到 `apifile/` 便于排查
 
 ## 资源导入指南
@@ -215,7 +233,7 @@ src/host/             Node 宿主：API 服务 / 静态托管 / 桥接层 / 渲�
 src/webrender/        渲染工作进程页面（无头浏览器加载，构建产物在 out/webrenderer/）
 src/renderer/         渲染引擎（PixiJS + Live2D + 导出管线）
 src/shared/           宿主与渲染侧共享的 ffmpeg 模块
-resources/            资源根：models/ images/ voices/ audio/bgm/ stories/
+resources/            资源根：models/ images/ voices/ audio/bgm/ stories/（不入库，见 resources/README.md）
 astrbot_plugin_msst/  AstrBot 机器人插件
 out-host/             宿主编译产物（npm run build:host 生成）
 docs/                 部署文档；deploy/ systemd 单元；scripts/ 测试与工具脚本

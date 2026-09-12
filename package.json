@@ -1,11 +1,11 @@
 {
-  "name": "my-sekai-storyteller",
+  "name": "my-sekai-storyteller-api",
   "version": "0.1.0",
   "description": "Headless pure-API Live2D video rendering framework in Project SEKAI style",
   "license": "GPL-3.0",
   "main": "./out-host/host/main.js",
   "author": "GuangChen2333",
-  "homepage": "https://github.com/Untitled-Story/MySekaiStoryteller/",
+  "homepage": "https://github.com/yonglanws/MySekaiStoryteller-API/",
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",

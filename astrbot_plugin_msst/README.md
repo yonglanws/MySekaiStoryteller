@@ -1,7 +1,7 @@
 # MySekaiStoryteller AstrBot 插件
 
 QQ/Telegram 机器人的 AI 剧本生成与视频发送插件：接收用户消息 → 调用 LLM 生成符合规范的
-JSON 剧本 → 交给 [MySekaiStoryteller 渲染宿主](https://github.com/yonglanws/MySekaiStoryteller)
+JSON 剧本 → 交给 [MySekaiStoryteller-API 渲染宿主](https://github.com/yonglanws/MySekaiStoryteller-API)
 渲染成 Live2D 视频 → 自动回传到群里。
 
 角色内容为 Project SEKAI「25时，Nightcord见。」同人设定（晓山瑞希 / 东云绘名 / 宵崎奏 / 朝比奈真冬）。
@@ -29,7 +29,7 @@ JSON 剧本 → 交给 [MySekaiStoryteller 渲染宿主](https://github.com/yong
 - AstrBot v3.4.15+
 - Python 3.10+
 - 已在 AstrBot WebUI 配置好的 LLM 对话模型（无需单独的 API Key）
-- 可访问的 MySekaiStoryteller 渲染宿主（本仓库 `npm run build && npm start`）
+- 可访问的 MySekaiStoryteller-API 渲染宿主（本仓库 `npm run build && npm start`）
 
 ## 安装步骤
 
@@ -146,5 +146,5 @@ astrbot_plugin_msst/
 
 ## 许可证
 
-本项目与 MySekaiStoryteller 渲染宿主一同以
-[GNU GPL v3](https://github.com/yonglanws/MySekaiStoryteller/blob/main/LICENSE) 许可证开源。
+本项目与 MySekaiStoryteller-API 渲染宿主一同以
+[GNU GPL v3](https://github.com/yonglanws/MySekaiStoryteller-API/blob/main/LICENSE) 许可证开源。

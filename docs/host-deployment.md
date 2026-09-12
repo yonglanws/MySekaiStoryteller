@@ -1,4 +1,4 @@
-# MySekaiStoryteller 纯 API 渲染宿主 — 部署指南
+# MySekaiStoryteller-API 纯 API 渲染宿主 — 部署指南
 
 本项目已从 Electron 桌面应用重构为**无头纯 API 渲染框架**：Live2D 渲染跑在无头 Chrome
 （Playwright 驱动）里，Node 宿主提供 HTTP API、静态资源托管与 ffmpeg 编码。无需桌面环境、
@@ -31,7 +31,7 @@ AstrBot 插件（`astrbot_plugin_msst/`）**零改动兼容**。
 ## 构建与启动
 
 ```bash
-git clone <repo> && cd MySekaiStoryteller
+git clone <repo> && cd MySekaiStoryteller-API
 npm ci
 npx playwright install chromium   # 服务器上没有 Edge/Chrome 时需要
 cp config.example.yaml config.yaml
@@ -39,6 +39,21 @@ vim config.yaml                   # 至少看一下 server/video/render 节
 npm run build                     # typecheck + vite(webrenderer) + tsc(host)
 npm start                         # node out-host/host/main.js
 ```
+
+### 资源准备（必需）
+
+仓库**不附带**渲染资源。首次部署需把 Live2D 模型、背景图、BGM、示例剧本放入资源根
+（默认 `resources/`，可用 `MSS_RESOURCE_DIR` 指向他处）：
+
+```bash
+# 方式一：从上游仓库整体拷贝 resources/（模型/背景/剧本/BGM 齐全，按需取舍）
+git clone --depth 1 https://github.com/Untitled-Story/MySekaiStoryteller /tmp/upstream
+cp -r /tmp/upstream/resources/. resources/
+
+# 方式二：使用你已有的资源包，按 resources/README.md 的目录结构放入
+```
+
+目录结构与登记方式见 [resources/README.md](../resources/README.md)。
 
 ## 配置（config.yaml）
 
@@ -93,12 +108,12 @@ curl http://127.0.0.1:9881/api/v1/health
 ## 端到端测试
 
 ```bash
-npm run e2e                        # 内置示例故事导出 + ffprobe 断言
+npm run e2e                        # 示例故事导出 + ffprobe 断言
 node scripts/test-parallel.mjs 2   # 双任务并发导出验证
 ```
 
-内置示例故事（`resources/stories/`）开箱可跑；E2E 还会把故事中缺失的模型变体
-自动替换为本机实际存在的资源。
+E2E 默认使用 `resources/stories/multi-character-demo.sekai-story.json`（随资源包提供，
+见上方「资源准备」），并会把故事中缺失的模型变体自动替换为本机实际存在的资源。
 
 ## systemd 部署（Linux 裸机 + NVIDIA）
 
@@ -106,13 +121,13 @@ node scripts/test-parallel.mjs 2   # 双任务并发导出验证
 
 ```ini
 [Unit]
-Description=MySekaiStoryteller Pure-API Render Host
+Description=MySekaiStoryteller-API Pure-API Render Host
 After=network.target
 
 [Service]
 Type=simple
 User=YOUR_USER
-WorkingDirectory=/opt/MySekaiStoryteller
+WorkingDirectory=/opt/MySekaiStoryteller-API
 Environment=MSS_FFMPEG_ENCODER=auto
 Environment=MSS_WORKERS=2
 ExecStart=/usr/bin/node out-host/host/main.js

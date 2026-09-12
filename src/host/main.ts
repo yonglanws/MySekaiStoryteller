@@ -8,7 +8,7 @@ import { createStaticRouter } from './static/staticRoutes'
 import { ResourceCatalog } from './resources/resourceCatalog'
 
 /**
- * MySekaiStoryteller 纯 API 渲染宿主。
+ * MySekaiStoryteller-API 纯 API 渲染宿主。
  *
  * 组成（单端口 9881）：
  * - VideoApiServer  视频导出 API（与旧版端点契约一致）
@@ -41,7 +41,7 @@ async function bootstrap(): Promise<void> {
   })
 
   logger.info(
-    `Starting MySekaiStoryteller host: root=${config.rootDir}, port=${config.server.port}, workers=${config.render.workers}, encoder=${config.video.encoder}`
+    `Starting MySekaiStoryteller-API host: root=${config.rootDir}, port=${config.server.port}, workers=${config.render.workers}, encoder=${config.video.encoder}`
   )
 
   const hub = new WsHub(logger, {
