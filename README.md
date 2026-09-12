@@ -14,7 +14,7 @@
 </div>
 
 > [!CAUTION]
-> **🔴 本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
+> **本项目目前处于初期开发阶段** —— 接口、配置项与故事格式均可能随时变动，
 > **不保证大部分功能的可用性与稳定性**。当前仅核心导出链路在有限环境下验证通过，Linux + NVIDIA 生产环境尚待实测。
 > 使用中遇到问题欢迎提交 [Issue](https://github.com/yonglanws/MySekaiStoryteller/issues)。
 
@@ -169,6 +169,30 @@ pip install -r requirements.txt
   宿主通过 `/resources/*` 提供访问
 - 内置示例故事在 `resources/stories/`，开箱即可用于 `npm run e2e`
 - 通过 API 导出时直接在请求体中提交完整故事 JSON；宿主会自动留档一份到 `apifile/` 便于排查
+
+## 资源导入指南
+
+### 新增 Live2D 角色（模型）
+
+1. 把模型包整个拷到 `resources/models/<角色>/<变体>/`，目录内需含 `model3.json`
+   （动作 `motions/*.motion3.json` 是模型包的一部分，由 model3.json 的
+   `FileReferences.Motions` 索引——**动作文件跟着模型走，不需要单独登记**）
+2. 在 `resources/models/models.yaml` 登记一行（`id` 全表唯一、`name` 角色全名、
+   `shortName` 简称、`path` 以磁盘实际文件名为准）
+3. 完成。宿主 30 秒内自动识别；AstrBot 插件 5 分钟内自动感知（可发 `/mssadmin resources` 确认），
+   提示词中的角色对照表、动作/表情清单、校验白名单**全部自动更新，无需改任何代码**
+
+> 插件端为「晓山瑞希/东云绘名/宵崎奏/朝比奈真冬」内置了详细人设档案；
+> 新角色会生成通用档案条目由 LLM 依据角色名演绎。如需为新角色定制 TTS 音色，
+> 在宿主 `config.yaml` 的 `tts.characters` 节配置。
+
+### 背景图 / 语音 / BGM
+
+| 资源 | 存放位置 | 如何生效 |
+| --- | --- | --- |
+| 背景图 | `resources/images/` | 自动进入目录，插件提示词与校验即时可用 |
+| 故事语音 | `resources/voices/` | 故事 JSON 的 `voice` 字段按文件名引用 |
+| BGM | `resources/audio/bgm/` | 在宿主 `config.yaml` 的 `bgm.path` 指定（如 `audio/bgm/bg1.mp3`） |
 
 ## TTS / BGM 配置
 

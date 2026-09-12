@@ -11,16 +11,18 @@ JSON 剧本 → 交给 [MySekaiStoryteller 渲染宿主](https://github.com/yong
 - **两种创作模式**
   - `/视频对话`：与瑞希单人对话，生成短视频回复（带 30 分钟持久化聊天历史与 roleplay 人设）
   - `/剧本生成`：根据场景描述生成多角色完整剧本，渲染为完整视频
+- **资源目录动态感知**：从渲染宿主 `GET /api/v1/resources` 拉取角色/动作/表情/背景清单，
+  提示词中的角色对照表与校验白名单**自动跟随宿主资源变化**——新增模型只需在宿主
+  `resources/models/models.yaml` 登记，无需改插件
 - **结构化输出保障**：优先走 OpenAI 兼容 `json_object` 响应格式；JSON 提取失败或校验失败时，
   把错误信息拼回 prompt 让 AI 自我修正（最多重试 2 次）
-- **资源白名单校验**：LLM 输出的模型路径、动作（motion）、表情（facial）逐项校验——
-  非法值自动回退该角色默认值，杜绝渲染报错（校验库 `motions.py` 由内置 Live2D 模型自动生成）
+- **资源白名单校验**：LLM 输出的模型路径、动作（motion）、表情（facial）、背景图逐项对照
+  资源目录校验，非法值自动回退该角色默认值，杜绝渲染报错
 - **队列与公平调度**：任务入队排队（容量 20），聊天任务优先于剧本任务；同一用户每轮只执行
   一个任务，防止刷屏；超时（默认 600s）自动取消，失败自动重试（最多 2 次）
 - **健壮的视频回传**：本地文件直发 → 多变体 URL → AstrBot 文件服务 token 等五重降级策略，
   兼容 Docker/NAT 等复杂网络环境
-- **运维能力**：导出统计、队列查看、任务取消、临时文件自动清理（每 30 分钟清理 2 小时前的产物）、
-  维护模式开关
+- **运维能力**：导出统计、队列查看、任务取消、资源查看、临时文件自动清理、维护模式开关
 
 ## 系统要求
 
@@ -78,6 +80,7 @@ pip install -r requirements.txt
 | `/mssadmin status`          | `/状态` `/系统状态`    | 插件与 API 连接状态 | `/mssadmin status`            |
 | `/mssadmin queue`           | `/队列` `/排队`      | 查看队列详情       | `/mssadmin queue`             |
 | `/mssadmin cancel <任务ID>`   | `/取消` `/终止` `/停止` | 取消排队中的任务     | `/mssadmin cancel 123`        |
+| `/mssadmin resources`       | `/资源列表` `/模型列表`  | 查看宿主可用角色/背景/BGM | `/mssadmin resources`         |
 | `/mssadmin cleanup`         | `/清理` `/清理文件`    | 清理临时文件       | `/mssadmin cleanup`           |
 | `/mssadmin setapi <URL>`    | -               | 设置渲染宿主 API 地址 | `/mssadmin setapi http://...` |
 
@@ -127,13 +130,19 @@ POST /api/v1/export → 渲染宿主渲染 Live2D 并导出 MP4
 ```
 astrbot_plugin_msst/
 ├── main.py              # 插件主文件（指令、LLM 编排、发送策略、统计与清理）
+├── resource_catalog.py  # 资源目录客户端（角色/动作/表情/背景动态感知，纯逻辑可独立测试）
 ├── queue_manager.py     # 队列管理（并发控制、公平调度、超时重试）
-├── motions.py           # Live2D 动作/表情校验库（由内置模型自动生成，勿手改）
 ├── metadata.yaml        # 插件元数据
 ├── _conf_schema.json    # 配置模式定义
 ├── requirements.txt     # Python 依赖（httpx）
 └── README.md            # 本文档
 ```
+
+## 新增角色 / 资源
+
+角色的模型路径、动作、表情、可用背景全部由渲染宿主的资源目录动态提供——**新增模型只需在宿主
+`resources/models/models.yaml` 登记，插件自动感知，无需改插件代码**。完整步骤见主 README 的
+「资源导入指南」，或直接发 `/mssadmin resources` 查看当前宿主已识别的资源。
 
 ## 许可证
 

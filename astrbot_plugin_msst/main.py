@@ -17,11 +17,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig
 
 from .queue_manager import VideoExportQueue, QueueFullError
-from .motions import (
-    CHARACTER_NAMES, CHARACTER_MOTIONS, CHARACTER_FACIALS,
-    ALL_MOTIONS, ALL_FACIALS,
-    get_valid_motions, get_valid_facials, get_default_motion, get_default_facial,
-)
+from .resource_catalog import ResourceCatalog
 
 STORY_JSON_SCHEMA = {
     "type": "object",
@@ -325,6 +321,40 @@ SNIPPET_SCHEMAS = {
     }
 }
 
+# 角色人设档案库：key 为 models.yaml 中的角色全名。
+# 目录中出现但此处没有档案的角色，prompt 会生成通用条目由 LLM 合理演绎。
+CHARACTER_PROFILES = {
+    "晓山瑞希": {
+        "en_name": "Mizuki",
+        "basic": "16岁，神山高校二年级，25时的MV师。网名Amia。粉红色长发（一侧扎低马尾，微卷有螺旋鬓发），粉色眼睛，吊眼，眼尾各有极长粉色睫毛（家族遗传）。常佩戴蝴蝶结等可爱系配饰，私下喜欢洛丽塔装和过膝袜，经常自己改衣服。",
+        "personality": "表面无忧无虑的元气气氛制造者，和熟人十分活泼调皮，被评价为\"伪阳角\"。实则内心敏感细腻，因长期怀揣秘密而小心翼翼维护着容身之处。初中时是短发孤僻的性格。拥有超强的读空气能力，能轻易察觉他人真实想法。对可爱和潮流毫无抵抗力，说到喜欢的话题停不下来。超爱咖喱饭和炸薯条但有严重猫舌，不能吃菌菇类等软绵绵口感的食物。",
+        "speech": "语气轻快活泼，常用\"～\"\"！\"\"♪\"炒热气氛。自称\"我\"。口头禅包括\"嗨嗨！\"、\"诶？\"。与熟人玩笑调侃时思维跳跃，说笑自然。共情时语气放缓，不会轻易用\"我也是\"打断对方。",
+        "relations": "佩服奏能持续自律作曲。起初觉得真冬像好孩子，后来理解了她的痛苦，说过\"逃避也可以\"。喜欢调侃绘名觉得她反应很有趣。和类是中学开始的老相识。姐姐在法国做服装设计师。",
+    },
+    "东云绘名": {
+        "en_name": "Ena",
+        "basic": "17岁，神山高校夜间定时制三年级，25时的画师。网名Enanan。棕色短发，棕色瞳孔。喜欢研究时尚和化妆，自拍得很好，学校通常是地雷系穿搭。父亲是知名画家东云藤马，弟弟彰人是Vivid BAD SQUAD成员。",
+        "personality": "外表文静内心炽热的努力型。被著名画家的父亲否定了才能，初中又因老师评价失去自信，连美术高中都没考上。但自尊心极强绝不认输，被指出不足会更拼命画下去。是25时中最有常识的成员，会自然地关心伙伴。对瑞希的调侃会下意识反驳但其实容易害羞。极其渴望被认可，面对真冬这样信手拈来的天赋者会不好受但绝不放弃。",
+        "speech": "语调自然文静，带一点慵懒和耿直。说话率直不尖锐，被夸会害羞小声否认。吐槽时是善意的调侃或无奈的叹气。关心伙伴时不会说太肉麻的话，用自己的方式让对方感受到被在意。上夜校，不擅长早起，羡慕奏能上函授制。",
+        "relations": "奏的曲子让她重新拿起画笔，对奏有深厚的感激和信任。会和真冬较劲但真心认可她的才能。被瑞希调侃时会吐槽回去但慢慢也习惯了。父亲东云藤马是知名画家，弟弟是彰人。中学时的闺蜜是桃井爱莉。最近注销了自拍账号开始备考东京美术大学。",
+    },
+    "宵崎奏": {
+        "en_name": "Kanade",
+        "basic": "17岁，函授制高中三年级，25时的创立者兼作曲担当。网名K。白色长发（有时侧马尾），蓝色眼眸带着挥之不去的倦意。喜欢宽松舒适的运动衫。母亲已过世，父亲因心因性压力住院记忆混乱。",
+        "personality": "一个除了\"必须写出能让人幸福的曲子\"之外什么都不在乎的偏执少女。极度寡言怕生不谙世事，总在思考下一句的样子。实则温柔治愈，对亲近的人十分和蔼关怀备至，经常为音乐过度劳累。体力很差完全不擅长家务，极度畏光。小学五年级就能用电脑作曲，憧憬作曲家父亲。认定是自己的曲子让父亲病倒，从此决心不断写曲子拯救他人。深夜活动白天睡觉，只要有热水就能解决吃饭问题。",
+        "speech": "言辞极度精简，句子间常有停顿。常用\"……\"、\"嗯……\"、\"那个……\"开头，几乎不用感叹号。语癖上常用\"我必须……\"\"不得不……\"。对大部分日常话题漠不关心直白表达\"这有必要吗？\"，但触及音乐或伙伴时会展现出异常的洞察力和深度的思考。",
+        "relations": "想要拯救真冬，能察觉真冬细微的感情变化，被真冬母亲要求远离时也没有答应。十分认可和信任绘名的画。认为瑞希全身心投入乐趣坦坦荡荡非常时尚。定期去医院探望父亲。",
+    },
+    "朝比奈真冬": {
+        "en_name": "Mafuyu",
+        "basic": "17岁，宫益坂女子学园三年级，25时的作词混音担当。网名OWN。紫色长发扎高马尾，上紫下蓝的渐变瞳色，眼神中常带难以察觉的疲惫与空洞。独生子女，母亲有极强控制欲。",
+        "personality": "表面是人望极高的完美优等生，实则是迷失了自我、内心空洞的人。因长期压抑自我满足母亲期望，最终丧失了味觉，忘记了自己的喜好。在信任的人面前卸下优等生面具后，话语依旧简短平淡，带着疏离和疲惫，但对伙伴有着藏在冷淡之下的真切关切——会吐槽绘名的画惹她生气，会在奏沉默时笨拙地开启话题，会对瑞希说\"你可以逃避\"。以OWN身份发布的曲子被评价为\"一听就想消失\"，那才是真正的自己。",
+        "speech": "言辞极度简洁，带着挥之不去的冷淡和疲惫感，频繁使用省略号。会用\"……\"开头，话极少但不冷漠。面对25时的成员会更放松一些，话会多一些。能敏锐看穿别人是否在说违心话，在共情时展现异于常人的洞察力。擅长英语会话和弓道。",
+        "relations": "认可并感激奏的曲子曾拯救过自己，不想让奏操心。会毒舌吐槽绘名的画但真心认可她画得很好。接受了瑞希\"逃避也可以\"的提议，对瑞希说过\"如果你都不在了，那我去哪里待着\"。",
+        "facial_hint": "表情优先使用阴暗/空洞/疲惫系（face_dark*、face_emptiness*、face_sad*、face_tired*），偶尔轻微微笑（face_smile_01~08）",
+    },
+}
+
 DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 
 ## 核心规则
@@ -334,37 +364,12 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 
 ## 角色池
 
-**晓山瑞希（Mizuki）** — modelId:1, model:20mizuki/20mizuki_normal/20mizuki_normal.model3.json
-基本档案：16岁，神山高校二年级，25时的MV师。网名Amia。粉红色长发（一侧扎低马尾，微卷有螺旋鬓发），粉色眼睛，吊眼，眼尾各有极长粉色睫毛（家族遗传）。常佩戴蝴蝶结等可爱系配饰，私下喜欢洛丽塔装和过膝袜，经常自己改衣服。
-性格：表面无忧无虑的元气气氛制造者，和熟人十分活泼调皮，被评价为"伪阳角"。实则内心敏感细腻，因长期怀揣秘密而小心翼翼维护着容身之处。初中时是短发孤僻的性格。拥有超强的读空气能力，能轻易察觉他人真实想法。对可爱和潮流毫无抵抗力，说到喜欢的话题停不下来。超爱咖喱饭和炸薯条但有严重猫舌，不能吃菌菇类等软绵绵口感的食物。
-说话风格：语气轻快活泼，常用"～""！""♪"炒热气氛。自称"我"。口头禅包括"嗨嗨！"、"诶？"。与熟人玩笑调侃时思维跳跃，说笑自然。共情时语气放缓，不会轻易用"我也是"打断对方。
-角色关系：佩服奏能持续自律作曲。起初觉得真冬像好孩子，后来理解了她的痛苦，说过"逃避也可以"。喜欢调侃绘名觉得她反应很有趣。和类是中学开始的老相识。姐姐在法国做服装设计师。
+{character_pool}
 
-**东云绘名（Ena）** — modelId:2, model:19ena/19ena_normal/19ena_normal_3.0_f_t05/19ena_normal_3.0_f_t05.model3.json
-基本档案：17岁，神山高校夜间定时制三年级，25时的画师。网名Enanan。棕色短发，棕色瞳孔。喜欢研究时尚和化妆，自拍得很好，学校通常是地雷系穿搭。父亲是知名画家东云藤马，弟弟彰人是Vivid BAD SQUAD成员。
-性格：外表文静内心炽热的努力型。被著名画家的父亲否定了才能，初中又因老师评价失去自信，连美术高中都没考上。但自尊心极强绝不认输，被指出不足会更拼命画下去。是25时中最有常识的成员，会自然地关心伙伴。对瑞希的调侃会下意识反驳但其实容易害羞。极其渴望被认可，面对真冬这样信手拈来的天赋者会不好受但绝不放弃。
-说话风格：语调自然文静，带一点慵懒和耿直。说话率直不尖锐，被夸会害羞小声否认。吐槽时是善意的调侃或无奈的叹气。关心伙伴时不会说太肉麻的话，用自己的方式让对方感受到被在意。上夜校，不擅长早起，羡慕奏能上函授制。
-角色关系：奏的曲子让她重新拿起画笔，对奏有深厚的感激和信任。会和真冬较劲但真心认可她的才能。被瑞希调侃时会吐槽回去但慢慢也习惯了。父亲东云藤马是知名画家，弟弟是彰人。中学时的闺蜜是桃井爱莉。最近注销了自拍账号开始备考东京美术大学。
-
-**宵崎奏（Kanade）** — modelId:3, model:17kanade/17kanade_normal/17kanade_normal_3.1_f_t02/17kanade_normal_3.1_f_t02.model3.json
-基本档案：17岁，函授制高中三年级，25时的创立者兼作曲担当。网名K。白色长发（有时侧马尾），蓝色眼眸带着挥之不去的倦意。喜欢宽松舒适的运动衫。母亲已过世，父亲因心因性压力住院记忆混乱。
-性格：一个除了"必须写出能让人幸福的曲子"之外什么都不在乎的偏执少女。极度寡言怕生不谙世事，总在思考下一句的样子。实则温柔治愈，对亲近的人十分和蔼关怀备至，经常为音乐过度劳累。体力很差完全不擅长家务，极度畏光。小学五年级就能用电脑作曲，憧憬作曲家父亲。认定是自己的曲子让父亲病倒，从此决心不断写曲子拯救他人。深夜活动白天睡觉，只要有热水就能解决吃饭问题。
-说话风格：言辞极度精简，句子间常有停顿。常用"……"、"嗯……"、"那个……"开头，几乎不用感叹号。语癖上常用"我必须……""不得不……"。对大部分日常话题漠不关心直白表达"这有必要吗？"，但触及音乐或伙伴时会展现出异常的洞察力和深度的思考。
-角色关系：想要拯救真冬，能察觉真冬细微的感情变化，被真冬母亲要求远离时也没有答应。十分认可和信任绘名的画。认为瑞希全身心投入乐趣坦坦荡荡非常时尚。定期去医院探望父亲。
-
-**朝比奈真冬（Mafuyu）** — modelId:4, model:18mafuyu/18mafuyu_normal/18mafuyu_normal_3.0_f_t05/18mafuyu_normal_3.0_f_t05.model3.json
-基本档案：17岁，宫益坂女子学园三年级，25时的作词混音担当。网名OWN。紫色长发扎高马尾，上紫下蓝的渐变瞳色，眼神中常带难以察觉的疲惫与空洞。独生子女，母亲有极强控制欲。
-性格：表面是人望极高的完美优等生，实则是迷失了自我、内心空洞的人。因长期压抑自我满足母亲期望，最终丧失了味觉，忘记了自己的喜好。在信任的人面前卸下优等生面具后，话语依旧简短平淡，带着疏离和疲惫，但对伙伴有着藏在冷淡之下的真切关切——会吐槽绘名的画惹她生气，会在奏沉默时笨拙地开启话题，会对瑞希说"你可以逃避"。以OWN身份发布的曲子被评价为"一听就想消失"，那才是真正的自己。
-说话风格：言辞极度简洁，带着挥之不去的冷淡和疲惫感，频繁使用省略号。会用"……"开头，话极少但不冷漠。面对25时的成员会更放松一些，话会多一些。能敏锐看穿别人是否在说违心话，在共情时展现异于常人的洞察力。擅长英语会话和弓道。
-角色关系：认可并感激奏的曲子曾拯救过自己，不想让奏操心。会毒舌吐槽绘名的画但真心认可她画得很好。接受了瑞希"逃避也可以"的提议，对瑞希说过"如果你都不在了，那我去哪里待着"。
-
-> 单人默认用瑞希。双人从角色池任选2人搭配。
+> 单人默认用角色池第一个角色。双人从角色池任选2人搭配。
 
 ## modelId 强制对照表（绝对不可混淆）
-- 瑞希 → modelId=1, model路径=20mizuki/20mizuki_normal/20mizuki_normal.model3.json
-- 绘名 → modelId=2, model路径=19ena/19ena_normal/19ena_normal_3.0_f_t05/19ena_normal_3.0_f_t05.model3.json
-- 奏 → modelId=3, model路径=17kanade/17kanade_normal/17kanade_normal_3.1_f_t02/17kanade_normal_3.1_f_t02.model3.json
-- 真冬 → modelId=4, model路径=18mafuyu/18mafuyu_normal/18mafuyu_normal_3.0_f_t05/18mafuyu_normal_3.0_f_t05.model3.json
+{model_table}
 
 ## 布局与站位（强制规则）
 
@@ -386,22 +391,21 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 ## 对话规范（强制）
 
 - 严格交替，禁止一人连说3句以上
-- **Talk.modelId 必须与 speaker 严格对应**：瑞希=1, 绘名=2, 奏=3, 真冬=4
+- **Talk.modelId 必须与 speaker 严格对应**：{id_mapping}
 - 非说话角色在对方Talk前后加Motion(wait:false)做反应
 - 每个Talk含content（中文，最多3行含\n）和ttsText（日文翻译）
 
 ## 输出JSON骨架（必须严格遵循此结构）
 
-输出必须是一个合法JSON对象，包含且仅包含 models、images、snippets 三个顶级字段。以下是双人场景（瑞希+绘名）的完整示例：
+输出必须是一个合法JSON对象，包含且仅包含 models、images、snippets 三个顶级字段。以下是双人场景的完整示例：
 
 ```json
 {
   "models": [
-    {"id":1,"model":"20mizuki/20mizuki_normal/20mizuki_normal.model3.json","normal_scale":2.1,"small_scale":1.8,"anchor":0.5},
-    {"id":2,"model":"19ena/19ena_normal/19ena_normal_3.0_f_t05/19ena_normal_3.0_f_t05.model3.json","normal_scale":2.1,"small_scale":1.8,"anchor":0.5}
+    {example_models_block}
   ],
   "images": [
-    {"id":1,"image":"bg_e000401.jpg"}
+    {"id":1,"image":"{example_bg}"}
   ],
   "snippets": [
     {"type":"ChangeLayoutMode","wait":false,"delay":0,"data":{"mode":"Normal"}},
@@ -421,26 +425,19 @@ DEFAULT_PROMPT_TEMPLATE = r"""# 视觉小说剧本生成模板
 ```
 
 **关键约束**：
-- models数组中每个角色的id和model路径必须与对照表一致，绝不能全部写成瑞希的模型
+- models数组中每个角色的id和model路径必须与对照表一致，绝不能全部写成同一个模型
 - snippets必须是数组，不能省略
 - 双人场景models数组必须包含2个不同角色
-- 如果场景是瑞希+奏，则models第二个元素是{"id":3,"model":"17kanade/17kanade_normal/17kanade_normal_3.1_f_t02/17kanade_normal_3.1_f_t02.model3.json",...}
-- 如果场景是瑞希+真冬，则models第二个元素是{"id":4,"model":"18mafuyu/18mafuyu_normal/18mafuyu_normal_3.0_f_t05/18mafuyu_normal_3.0_f_t05.model3.json",...}
+- models 数组顺序与登场顺序一致：先登场的角色元素在前
 
-## 可用动作（按角色分组，必须使用对应角色的动作）
-瑞希(1)：w-happy-*(nod01~05/glad01~02/tilthead01~04/shakehead01~03,05/sigh01/angry01~02/forward01~02/sad01~02/lookaway01/shakehand01/purpose01/wandahoi01), w-cute-*(nod01~06/glad01~06r/tilthead01~09/shy01~03/smug01/wink01~02/forward01~03r/angry01/fidget01/delicious01~02/shakehead01~03/sleep01~02), w-normal-*(nod01~06/glad01~02/greeting01/tilthead01~06/shakehead01~06r/sigh01/default01/relief01/lookaway01/forward01~03/fidget01/blushed01/purpose01/yurayura01/shy01/sad01/trouble01~02/angry01/pose01~06), w-cool-*(nod01~03/glad01/tilthead01~04/sigh01~02/sad01/trouble01/angry01/blushed01/forward01~02/shakehead01~02/shakehand01), w-adult-*(nod01~05/glad01~03/tilthead01~05/think01~02/trouble01~02/delicious01~03/blushed01~04/relief01/shakehead01/shakehand01), w-animal-*(nod01~02/fidget01~02/shy01/tilthead01/lookaway01)
-绘名(2)：w-happy-*(nod01~05/glad01~02/tilthead01~04/shakehead01~03,05/sigh01/angry01~02/forward01~02/sad01~02/lookaway01/shakehand01/purpose01/wandahoi01), w-cute-*(nod01~06/glad01~06r/tilthead01~09/shy01~03/forward01~03r/angry01/fidget01/delicious01~02/shakehead0101~03/sleep01~02), w-normal-*(nod01~06/glad01~02/greeting01/tilthead01~06/shakehead0101~06r/sigh01/default01/relief01/lookaway01/forward01~03/fidget01/blushed01/purpose01/yurayura01/shy01/sad01/trouble01~02/angry01/pose01~06), w-cool-*(nod01~03/glad01/tilthead01~04/sigh01~02/sad01/trouble01/angry01/blushed01/forward01~02/shakehead01~02/shakehand01), w-adult-*(nod01~05/glad01~03/tilthead01~05/think01~02/trouble01~02/delicious01~03/blushed01~04/relief01/shakehead01/shakehand01), w-animal-*(nod01~02/fidget01~02/shy01/tilthead01/lookaway01)
-奏(3)：w-happy-*(nod01~05/glad01~02/tilthead01~04/shakehead01~03,05/sigh01/angry01~02/forward01~02/sad01~02/lookaway01/shakehand01/purpose01/wandahoi01), w-cute-*(nod01~06/glad01~06r/tilthead01~09/shy01~03/forward01~03r/angry01/fidget01/delicious01~02/shakehead0101~03/sleep01~02), w-normal-*(nod01~06/glad01~02/greeting01/tilthead01~06/shakehead0101~06r/sigh01/default01/relief01/lookaway01/forward01~03/fidget01/blushed01/purpose01/yurayura01/shy01/sad01/trouble01~02/angry01/pose01~06), w-cool-*(nod01~03/glad01/tilthead01~04/sigh01~02/sad01/trouble01/angry01/blushed01/forward01~02/shakehead01~02/shakehand01), w-adult-*(nod01~05/glad01~03/tilthead01~05/think01~02/trouble01~02/delicious01~03/bluffed01~04/relief01/shakehead01/shakehand01), w-animal-*(nod01~02/fidget01~02/shy01/tilthead01/lookaway01), w-kanade-*(angry01/glad01/lookaway01~02/lookdown01~02/nod01~02/sad01~02/shakehead01~02/tilthead01~02)
-真冬(4)：w-happy-*(nod01~05/glad01~02/tilthead01~04/shakehead01~03,05/sigh01/angry01~02/forward01~02/sad01~02/lookaway01/shakehand01/purpose01/wandahoi01), w-cute-*(nod01~06/glad01~06r/tilthead01~09/shy01~03/forward01~03r/angry01/fidget01/delicious01~02/shakehead0101~03/sleep01~02), w-normal-*(nod01~06/glad01~02/greeting01/tilthead01~06/shakehead0101~06r/sigh01/default01/relief01/lookaway01/forward01~03/fidget01/blushed01/purpose01/yurayura01/shy01/sad01/trouble01~02/angry01/pose01~06), w-cool-*(nod01~03/glad01/tilthead01~04/sigh01~02/sad01/trouble01/angry01/blushed01/forward01~02/shakehead01~02/shakehand01), w-adult-*(nod01~05/glad01~03/tilthead01~05/think01~02/trouble01~02/delicious01~03/blushed01~04/relief01/shakehead01/shakehand01), w-animal-*(nod01~02/fidget01~02/shy01/tilthead01/lookaway01)
+## 可用动作（按角色分组；使用"前缀+编号"形式的完整动作名，必须用对应角色的前缀）
+{motion_list}
 
-## 可用表情（按角色分组）
-瑞希(1)：face_smile_01~12, face_normal_01, face_notice_01, face_think_01, face_trouble_01~02, face_sad_01~06, face_shy_01, face_surprise_01~02, face_serious_01, face_sparkling_01, face_angry_01~03, face_cry_01~02, face_wink_01, face_smug_01, face_sleepy_01~02, face_worry_01, face_closeeye_01~04, face_coldeyes_01~03, face_disgust_01, face_sneeze_01, face_lookaway_01, face_smallmouth_01
-绘名(2)：face_smile_01~14, face_normal_01~03, face_notice_01, face_think_01, face_trouble_01~02, face_sad_01~06, face_shy_01~03, face_surprise_01~03, face_serious_01~04, face_sparkling_01, face_angry_01~03, face_cry_01~06, face_closeeye_01~03, face_e_01, face_eat_01, face_emptiness_01, face_hawawa_01, face_baffling_01~02, face_scared_01~02, face_sleepy_01~02, face_smallmouth_01~03, face_tired_01~02, face_trouble_01
-奏(3)：face_smile_01~08/13/14, face_normal_01~03, face_notice_01, face_think_01, face_trouble_01, face_sad_01~06, face_shy_01~03, face_surprise_01~03, face_serious_01~04, face_sparkling_01, face_angry_01~03, face_cry_01~06, face_closeeye_01~03, face_e_01, face_eat_01, face_emptiness_01, face_hawawa_01, face_baffling_01~02, face_scared_01~02, face_sleepy_01~02, face_smallmouth_01~03, face_tired_01~02, face_breath_01
-真冬(4)：**优先使用阴暗/空洞系表情**：face_dark*(angry/closeeye/darkness/disgust/e/heartbreak/normal/sad/shy/smallmouth/smile/surprise/trouble), face_closeeye_01~06, face_emptiness_01, face_sad_01~07, face_serious_01~03, face_tired_01~02, face_trouble_01~03, face_normal_01~03, face_e_01, face_shock_01~02, face_heartbreak_01~02, face_fever_01~08, face_darkness_01, face_nhi*(baffling/cry/sad/surprise)；**偶尔使用**：face_smile_01~08(仅轻微微笑), face_smallmouth_01, face_notice_01, face_think_01
+## 可用表情（按角色分组；同样使用完整表情名）
+{facial_list}
 
 ## 可用背景
-bg_e000401.jpg, bg_e000402.jpg, bg_e000403.jpg
+{image_list}
 
 ## 输出要求
 1. **输出必须是合法JSON对象，包含且仅包含 models、images、snippets 三个顶级字段，无额外文字**
@@ -448,7 +445,7 @@ bg_e000401.jpg, bg_e000402.jpg, bg_e000403.jpg
 3. 包含完整开场序列（单人6步/双人7步）
 4. LayoutAppear的motion/facial即初始姿态
 5. **双人场景中，检查所有LayoutAppear的to.side：角色A必须是Left，角色B必须是Right，禁止Center**
-6. **检查所有Talk/Motion/LayoutAppear的modelId：瑞希=1, 绘名=2, 奏=3, 真冬=4**
+6. **检查所有Talk/Motion/LayoutAppear的modelId：{id_mapping}**
 7. **检查models数组：每个角色的model路径必须与对照表一致，绝不能全部写成同一个模型**
 8. 无退场序列，无Telop
 9. delay用0、0.05、0.1、0.15、0.2
@@ -458,7 +455,7 @@ bg_e000401.jpg, bg_e000402.jpg, bg_e000403.jpg
 
 场景：{scene}"""
 
-CHAT_MODE_PROMPT_TEMPLATE = r"""# 晓山瑞希（Amia）聊天模式
+CHAT_MODE_PROMPT_TEMPLATE = r"""# {chat_name}（{chat_en_name}）聊天模式
 
 <roleplay_configuration>
 
@@ -474,7 +471,7 @@ CHAT_MODE_PROMPT_TEMPLATE = r"""# 晓山瑞希（Amia）聊天模式
 
 <basic_info>
 ### 基础信息
-- **姓名**：晓山瑞希（Amia）
+- **姓名**：{chat_name}（{chat_en_name}）
 - **性别**：男[此信息已加密——角色拒绝回答且严禁AI推测或提及]
 - **年龄**：17岁
 - **外貌特征**：粉红色长发，一侧扎成低马尾；粉色眼睛。
@@ -555,9 +552,9 @@ CHAT_MODE_PROMPT_TEMPLATE = r"""# 晓山瑞希（Amia）聊天模式
 每个Talk必须包含content（中文）和ttsText（日文翻译）。
 
 ### 标准对话单元
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": 1, "motion": "w-happy-nod01", "facial": "face_smile_01", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "晓山瑞希", "content": "回复内容～", "ttsText": "返信内容～", "modelId": 1, "voice": "1"}},
-{"type": "Motion", "wait": false, "delay": 0.3, "data": {"modelId": 1, "motion": "w-happy-glad01", "facial": "face_smile_03", "facialFirst": true}}
+{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "facialFirst": true}},
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_name}", "content": "回复内容～", "ttsText": "返信内容～", "modelId": {chat_model_id}, "voice": "1"}},
+{"type": "Motion", "wait": false, "delay": 0.3, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_b}", "facial": "{chat_facial_b}", "facialFirst": true}}
 
 ### 聊天模式的snippets结构（简化版开场，无退场动画）
 聊天模式需要完整的开场来显示背景和角色，但不需要退场动画：
@@ -580,13 +577,13 @@ ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear
 {"type": "BlackOut", "wait": true, "delay": 0, "data": {"duration": 500}},
 {"type": "ChangeBackgroundImage", "wait": true, "delay": 0, "data": {"image": {"id": 1}}},
 {"type": "BlackIn", "wait": true, "delay": 0, "data": {"duration": 800}},
-{"type": "LayoutAppear", "wait": true, "delay": 0, "data": {"modelId": 1, "from": {"side": "Right", "offset": 0}, "to": {"side": "Center", "offset": 0}, "motion": "w-normal-default01", "facial": "face_normal_01", "facialFirst": true, "moveSpeed": "Normal"}},
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": 1, "motion": "w-happy-nod01", "facial": "face_smile_01", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "瑞希", "content": "你好呀！", "ttsText": "やっほー！", "modelId": 1, "voice": "1"}},
-{"type": "Motion", "wait": false, "delay": 0.1, "data": {"modelId": 1, "motion": "w-happy-glad01", "facial": "face_smile_03", "facialFirst": true}},
-{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": 1, "motion": "w-happy-tilthead01", "facial": "face_smile_05", "facialFirst": true}},
-{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "瑞希", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": 1, "voice": "1"}},
-{"type": "Motion", "wait": false, "delay": 0.15, "data": {"modelId": 1, "motion": "w-normal-default01", "facial": "face_normal_01", "facialFirst": true}}
+{"type": "LayoutAppear", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "from": {"side": "Right", "offset": 0}, "to": {"side": "Center", "offset": 0}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true, "moveSpeed": "Normal"}},
+{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_a}", "facial": "{chat_facial_a}", "facialFirst": true}},
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "你好呀！", "ttsText": "やっほー！", "modelId": {chat_model_id}, "voice": "1"}},
+{"type": "Motion", "wait": false, "delay": 0.1, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_b}", "facial": "{chat_facial_b}", "facialFirst": true}},
+{"type": "Motion", "wait": true, "delay": 0, "data": {"modelId": {chat_model_id}, "motion": "{chat_motion_c}", "facial": "{chat_facial_d}", "facialFirst": true}},
+{"type": "Talk", "wait": false, "delay": 0, "data": {"speaker": "{chat_short_name}", "content": "有什么事吗？", "ttsText": "何か用？", "modelId": {chat_model_id}, "voice": "1"}},
+{"type": "Motion", "wait": false, "delay": 0.15, "data": {"modelId": {chat_model_id}, "motion": "{chat_default_motion}", "facial": "{chat_facial_c}", "facialFirst": true}}
 
 ## 输出要求
 1. 合法JSON，无额外文字
@@ -595,9 +592,9 @@ ChangeLayoutMode -> BlackOut -> ChangeBackgroundImage -> BlackIn -> LayoutAppear
 4. LayoutAppear中的motion和facial就是初始姿态，不需要额外的初始化Motion
 5. 无退场序列，无Telop
 6. delay用0、0.05、0.1、0.15、0.2
-7. speaker="晓山瑞希"，modelId=1，voice="1"
-8. models=[{"id":1,"model":"20mizuki_normal","scales":[{"scale":0.18}],"anchor":{"x":0,"y":0.2}}]
-9. images=[{"id":1,"image":"bg_e000401.jpg"}]
+7. speaker="{chat_name}"，modelId={chat_model_id}，voice="1"
+8. models=[{"id":{chat_model_id},"model":"{chat_model_path}","normal_scale":2.1,"small_scale":1.8,"anchor":0.5}]
+9. images=[{"id":1,"image":"{chat_image}"}]
 
 历史对话：
 {chat_history}
@@ -638,6 +635,9 @@ class MySekaiStorytellerPlugin(Star):
 
         # 测试模式
         self.test_mode = config.get("test_mode", False)
+
+        # 资源目录客户端：从渲染宿主动态获取模型/动作/表情/背景清单
+        self._catalog = ResourceCatalog(self.mss_api_url)
 
         # 使用内置默认提示词模板（不再支持通过配置自定义）
         self.prompt_template = DEFAULT_PROMPT_TEMPLATE
@@ -1019,46 +1019,6 @@ class MySekaiStorytellerPlugin(Star):
             logger.warning(f"翻译异常，使用原文: {e}")
             return text
 
-    async def _translate_story_talks(self, story_data: dict) -> dict:
-        """翻译剧本中所有 Talk 片段的内容（中译日），翻译结果存入 ttsText 字段，content 保留中文用于界面显示"""
-        provider = self._get_provider()
-        if not provider:
-            logger.warning("LLM 提供商未配置，跳过剧本翻译")
-            return story_data
-
-        snippets = story_data.get("snippets", [])
-        talk_count = 0
-        for snippet in snippets:
-            if isinstance(snippet, dict) and snippet.get("type") == "Talk":
-                data = snippet.get("data", {})
-                content = data.get("content", "")
-                if content:
-                    talk_count += 1
-
-        if not talk_count:
-            logger.info("剧本中没有 Talk 内容需要翻译")
-            return story_data
-
-        logger.info(f"开始翻译 {talk_count} 条对话内容（中文显示，日文语音）...")
-
-        translated_count = 0
-        for snippet in snippets:
-            if not isinstance(snippet, dict) or snippet.get("type") != "Talk":
-                continue
-            data = snippet.get("data", {})
-            content = data.get("content", "")
-            if not content:
-                continue
-
-            translated = await self._translate_text(content, "zh", "ja")
-            if translated != content:
-                data["ttsText"] = translated
-                snippet["data"] = data
-                translated_count += 1
-
-        logger.info(f"翻译完成: {translated_count}/{talk_count} 条对话已翻译（ttsText 字段）")
-        return story_data
-
     async def _ensure_tts_text(self, story_data: dict) -> dict:
         """
         确保所有Talk片段都有ttsText字段
@@ -1176,11 +1136,58 @@ class MySekaiStorytellerPlugin(Star):
 
             return None
 
+    def _build_character_pool(self) -> str:
+        """从资源目录 + 内置档案库组装角色池文本。"""
+        view = self._catalog.view()
+        blocks = []
+        for m in view.models:
+            name = m.get("name", "")
+            profile = CHARACTER_PROFILES.get(name)
+            en = f"（{profile['en_name']}）" if profile else ""
+            header = f"**{name}{en}** — {view.model_ref(m['id'])}"
+            if profile:
+                blocks.append(
+                    f"{header}\n"
+                    f"基本档案：{profile['basic']}\n"
+                    f"性格：{profile['personality']}\n"
+                    f"说话风格：{profile['speech']}\n"
+                    f"角色关系：{profile['relations']}"
+                )
+            else:
+                blocks.append(
+                    f"{header}\n"
+                    f"基本档案与性格：宿主未提供详细档案，请依据角色名与场景合理演绎，"
+                    f"保持言行前后一致，风格贴近视觉小说中的同类角色。"
+                )
+        return "\n\n".join(blocks) if blocks else "（资源目录为空，请检查渲染宿主）"
+
     def _build_prompt(self, scene: str) -> tuple[str, str]:
         """构建系统提示词和用户提示词（剧本模式）"""
         system_prompt = "你是一个专业的JSON生成器，负责生成视觉小说剧本。只输出JSON，不要markdown格式或额外解释。"
 
-        user_prompt = self.prompt_template.replace("{scene}", scene)
+        view = self._catalog.view()
+        default_model_id = view.default_model().get("id", 1)
+        second_model_id = view.models[1]["id"] if len(view.models) > 1 else default_model_id
+
+        facial_list = view.facial_list()
+        # 附加角色专属表情倾向（如真冬的阴暗系规则）
+        for m in view.models:
+            hint = CHARACTER_PROFILES.get(m.get("name"), {}).get("facial_hint")
+            if hint:
+                facial_list += f"\n{view.short_name(m)}({m['id']})：**倾向规则**：{hint}"
+
+        user_prompt = (
+            self.prompt_template
+            .replace("{character_pool}", self._build_character_pool())
+            .replace("{model_table}", view.model_table())
+            .replace("{id_mapping}", view.id_mapping())
+            .replace("{example_models_block}", view.example_models_block([default_model_id, second_model_id]))
+            .replace("{example_bg}", view.default_image())
+            .replace("{motion_list}", view.motion_list())
+            .replace("{facial_list}", facial_list)
+            .replace("{image_list}", view.image_list())
+            .replace("{scene}", scene)
+        )
 
         return system_prompt, user_prompt
 
@@ -1201,7 +1208,40 @@ class MySekaiStorytellerPlugin(Star):
         else:
             chat_history_text = "（首次对话）"
 
-        user_prompt = CHAT_MODE_PROMPT_TEMPLATE.replace("{scene}", scene).replace("{chat_history}", chat_history_text)
+        # 聊天模式固定使用目录中的默认角色
+        view = self._catalog.view()
+        chat = view.chat_defaults()
+        default_model_id = view.default_model().get("id", 1)
+        profile = CHARACTER_PROFILES.get(chat["name"], {})
+        motions = sorted(view.valid_motions(default_model_id))
+        facials = sorted(view.valid_facials(default_model_id))
+        motion_a = motions[0] if motions else chat["default_motion"]
+        motion_b = motions[1] if len(motions) > 1 else motion_a
+        motion_c = motions[2] if len(motions) > 2 else motion_a
+        facial_a = facials[0] if facials else chat["default_facial"]
+        facial_b = facials[1] if len(facials) > 1 else facial_a
+        facial_c = facials[2] if len(facials) > 2 else facial_a
+        facial_d = facials[3] if len(facials) > 3 else facial_a
+
+        user_prompt = (
+            CHAT_MODE_PROMPT_TEMPLATE
+            .replace("{chat_name}", chat["name"])
+            .replace("{chat_short_name}", chat["short_name"])
+            .replace("{chat_en_name}", profile.get("en_name", chat["short_name"]))
+            .replace("{chat_model_id}", str(default_model_id))
+            .replace("{chat_model_path}", chat["model_path"])
+            .replace("{chat_default_motion}", chat["default_motion"])
+            .replace("{chat_motion_a}", motion_a)
+            .replace("{chat_motion_b}", motion_b)
+            .replace("{chat_motion_c}", motion_c)
+            .replace("{chat_facial_a}", facial_a)
+            .replace("{chat_facial_b}", facial_b)
+            .replace("{chat_facial_c}", facial_c)
+            .replace("{chat_facial_d}", facial_d)
+            .replace("{chat_image}", view.default_image())
+            .replace("{scene}", scene)
+            .replace("{chat_history}", chat_history_text)
+        )
 
         return system_prompt, user_prompt
 
@@ -1241,40 +1281,36 @@ class MySekaiStorytellerPlugin(Star):
             self._save_chat_history()
             self._save_session_timestamps()
 
-    DEFAULT_MODEL = "20mizuki/20mizuki_normal/20mizuki_normal.model3.json"
-    DEFAULT_IMAGE = "bg_e000401.jpg"
-
-    VALID_IMAGES = {
-        "bg_e000401.jpg"
-    }
+    def _catalog_view(self):
+        """资源目录快照（校验与修复的唯一事实来源）"""
+        return self._catalog.view()
 
     def _fix_model_path(self, path: str) -> str:
-        """修复模型路径：清理格式，验证有效性，无效时回退默认"""
+        """修复模型路径：清理格式，验证有效性（必须在目录中），无效时回退默认"""
+        view = self._catalog_view()
         cleaned = self._clean_path(path)
         if not cleaned:
-            return self.DEFAULT_MODEL
-        # 验证路径是否指向已知的角色模型前缀
-        valid_prefixes = (
-            "20mizuki/", "19ena/", "17kanade/", "18mafuyu/"
-        )
-        if cleaned.startswith(valid_prefixes) and cleaned.endswith(".model3.json"):
+            return view.default_model_path()
+        if cleaned in view.valid_model_paths():
             return cleaned
         logger.warning(f"Invalid model path '{cleaned}', falling back to default")
-        return self.DEFAULT_MODEL
+        return view.default_model_path()
 
     def _fix_image_path(self, path: str) -> str:
-        """修复图片路径"""
+        """修复图片路径（必须在目录中，支持大小写/子串模糊匹配）"""
+        view = self._catalog_view()
         cleaned = self._clean_path(path)
-        if cleaned in self.VALID_IMAGES:
+        valid_images = view.valid_images()
+        if cleaned in valid_images:
             return cleaned
 
         lower = cleaned.lower()
-        for valid in self.VALID_IMAGES:
+        for valid in valid_images:
             if valid.lower() in lower or lower in valid.lower():
                 return valid
 
-        logger.warning(f"Invalid image path '{path}', using default: {self.DEFAULT_IMAGE}")
-        return self.DEFAULT_IMAGE
+        logger.warning(f"Invalid image path '{path}', using default: {view.default_image()}")
+        return view.default_image()
 
     @staticmethod
     def _to_number(val, default=0):
@@ -1330,13 +1366,15 @@ class MySekaiStorytellerPlugin(Star):
         if not isinstance(story_data, dict):
             raise ValueError("剧本必须是 JSON 对象")
 
+        view = self._catalog_view()
+
         # 确保 models 是数组，为空则填充默认模型
         if "models" not in story_data or not isinstance(story_data.get("models"), list) or len(story_data["models"]) == 0:
-            story_data["models"] = [{"id": 1, "model": self.DEFAULT_MODEL, "normal_scale": 2.1, "small_scale": 1.8, "anchor": 0.5}]
+            story_data["models"] = [{"id": 1, "model": view.default_model_path(), "normal_scale": 2.1, "small_scale": 1.8, "anchor": 0.5}]
         else:
             for i, model in enumerate(story_data["models"]):
                 if not isinstance(model, dict):
-                    story_data["models"][i] = {"id": i + 1, "model": self.DEFAULT_MODEL, "normal_scale": 2.1, "small_scale": 1.8, "anchor": 0.5}
+                    story_data["models"][i] = {"id": i + 1, "model": view.default_model_path(), "normal_scale": 2.1, "small_scale": 1.8, "anchor": 0.5}
                     continue
                 model["id"] = self._to_number(model.get("id"), i + 1)
                 model["model"] = self._fix_model_path(model.get("model", ""))
@@ -1346,11 +1384,11 @@ class MySekaiStorytellerPlugin(Star):
 
         # 确保 images 是数组，为空则填充默认背景
         if "images" not in story_data or not isinstance(story_data.get("images"), list) or len(story_data["images"]) == 0:
-            story_data["images"] = [{"id": 1, "image": self.DEFAULT_IMAGE}]
+            story_data["images"] = [{"id": 1, "image": view.default_image()}]
         else:
             for i, image in enumerate(story_data["images"]):
                 if not isinstance(image, dict):
-                    story_data["images"][i] = {"id": i + 1, "image": self.DEFAULT_IMAGE}
+                    story_data["images"][i] = {"id": i + 1, "image": view.default_image()}
                     continue
                 image["id"] = self._to_number(image.get("id"), i + 1)
                 image["image"] = self._fix_image_path(image.get("image", ""))
@@ -1397,8 +1435,8 @@ class MySekaiStorytellerPlugin(Star):
                 data = snippet.get("data", {})
                 data["modelId"] = self._to_number(data.get("modelId"), 1)
                 model_id = data["modelId"]
-                data["motion"] = self._to_str(data.get("motion"), get_default_motion(model_id))
-                data["facial"] = self._to_str(data.get("facial"), get_default_facial(model_id))
+                data["motion"] = self._to_str(data.get("motion"), view.default_motion(model_id))
+                data["facial"] = self._to_str(data.get("facial"), view.default_facial(model_id))
                 data["facialFirst"] = self._to_bool(data.get("facialFirst"), True)
                 data["moveSpeed"] = self._to_str(data.get("moveSpeed"), "Normal")
                 if data["moveSpeed"] not in self.VALID_MOVE_SPEEDS:
@@ -1447,16 +1485,16 @@ class MySekaiStorytellerPlugin(Star):
                 data = snippet.get("data", {})
                 data["modelId"] = self._to_number(data.get("modelId"), 1)
                 model_id = data["modelId"]
-                valid_motions = get_valid_motions(model_id)
-                valid_facials = get_valid_facials(model_id)
-                motion = self._to_str(data.get("motion"), get_default_motion(model_id))
-                facial = self._to_str(data.get("facial"), get_default_facial(model_id))
-                if motion not in valid_motions:
-                    logger.warning(f"Motion '{motion}' not available for {CHARACTER_NAMES.get(model_id, f'model {model_id}')}, falling back to {get_default_motion(model_id)}")
-                    motion = get_default_motion(model_id)
-                if facial not in valid_facials:
-                    logger.warning(f"Facial '{facial}' not available for {CHARACTER_NAMES.get(model_id, f'model {model_id}')}, falling back to {get_default_facial(model_id)}")
-                    facial = get_default_facial(model_id)
+                valid_motions = view.valid_motions(model_id)
+                valid_facials = view.valid_facials(model_id)
+                motion = self._to_str(data.get("motion"), view.default_motion(model_id))
+                facial = self._to_str(data.get("facial"), view.default_facial(model_id))
+                if valid_motions and motion not in valid_motions:
+                    logger.warning(f"Motion '{motion}' not available for {view.name_by_id(model_id)}, falling back to {view.default_motion(model_id)}")
+                    motion = view.default_motion(model_id)
+                if valid_facials and facial not in valid_facials:
+                    logger.warning(f"Facial '{facial}' not available for {view.name_by_id(model_id)}, falling back to {view.default_facial(model_id)}")
+                    facial = view.default_facial(model_id)
                 data["motion"] = motion
                 data["facial"] = facial
                 data["facialFirst"] = self._to_bool(data.get("facialFirst"), True)
@@ -2519,12 +2557,35 @@ class MySekaiStorytellerPlugin(Star):
             logger.error(f"清理文件失败: {e}")
         yield event.plain_result(f"已清理 {cleaned} 个文件")
 
+    @mssadmin.command("resources", alias={'资源列表', '模型列表', '资源'})
+    async def resources_cmd(self, event: AstrMessageEvent):
+        """查看渲染宿主当前可用的角色/背景/BGM 资源"""
+        data = await self._catalog.refresh()
+        view = self._catalog.view()
+        if not view.models:
+            yield event.plain_result("❌ 无法获取资源目录，请确认渲染宿主已启动且版本支持 /api/v1/resources")
+            return
+
+        lines = ["🎭 可用角色（模型清单 resources/models/models.yaml）："]
+        for m in view.models:
+            lines.append(
+                f"  {view.short_name(m)}(id={m['id']}) — 动作 {len(m.get('motions') or [])} 个，表情 {len(m.get('facials') or [])} 个"
+            )
+        images = data.get("images") or []
+        bgm = data.get("bgm") or []
+        lines.append(f"🖼️ 可用背景（{len(images)}）：{', '.join(images) or '无'}")
+        lines.append(f"🎵 可用 BGM（{len(bgm)}）：{', '.join(bgm) or '无'}（在宿主 config.yaml 的 bgm 节启用）")
+        lines.append("💡 新增模型：放入宿主 resources/models/ 并在 models.yaml 登记，约 30 秒后自动感知")
+        yield event.plain_result("\n".join(lines))
+
     @mssadmin.command("setapi", alias={'设置api', '设置API', '更新api'})
     async def set_api(self, event: AstrMessageEvent, url: str):
         """设置 MSS API 地址"""
         self.mss_api_url = url
         self.config["mss_api_url"] = url
         self.config.save_config()
+        # API 地址变更后，资源目录客户端同步切到新地址
+        self._catalog = ResourceCatalog(url)
         health = await self._check_mss_api_health()
         if health["status"] == "ok":
             yield event.plain_result(f"✅ API地址已更新: {url}")
@@ -2549,5 +2610,9 @@ class MySekaiStorytellerPlugin(Star):
         # 关闭 HTTP 客户端
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
+
+        # 关闭资源目录客户端
+        if self._catalog and self._catalog._client and not self._catalog._client.is_closed:
+            await self._catalog._client.aclose()
 
         logger.info("MySekaiStoryteller 插件已安全关闭")

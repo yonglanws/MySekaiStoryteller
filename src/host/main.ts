@@ -5,6 +5,7 @@ import { createBridgeRouter } from './bridge/bridgeRoutes'
 import { WsHub } from './bridge/wsHub'
 import { RenderPool } from './pool/renderPool'
 import { createStaticRouter } from './static/staticRoutes'
+import { ResourceCatalog } from './resources/resourceCatalog'
 
 /**
  * MySekaiStoryteller 纯 API 渲染宿主。
@@ -51,6 +52,8 @@ async function bootstrap(): Promise<void> {
 
   const pool = new RenderPool(logger, config, hub)
 
+  const resourceCatalog = new ResourceCatalog(logger, config)
+
   const apiServer = new VideoApiServer(logger, {
     port: config.server.port,
     host: config.server.host,
@@ -58,8 +61,12 @@ async function bootstrap(): Promise<void> {
     video: config.video,
     registerExtraRoutes: (app) => {
       app.use('/bridge', createBridgeRouter({ logger, config }))
+      // 资源目录：供 AstrBot 插件动态构建提示词与校验白名单
+      app.get('/api/v1/resources', (_req, res) => {
+        res.json({ success: true, ...resourceCatalog.get() })
+      })
       app.use(createStaticRouter(config))
-      logger.info('[Host] Bridge and static routes mounted')
+      logger.info('[Host] Bridge, resource catalog and static routes mounted')
     }
   })
 
